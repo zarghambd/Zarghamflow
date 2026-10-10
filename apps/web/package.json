@@ -1,0 +1,8 @@
+{
+  "name": "@zarghamflow/web",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite --host 127.0.0.1", "build": "vite build", "typecheck": "tsc --noEmit -p tsconfig.json" },
+  "dependencies": { "@zarghamflow/shared": "*", "idb": "^8.0.3", "luxon": "^3.6.1" },
+  "devDependencies": { "vite": "^6.3.5", "typescript": "^5.8.3" }
+}

@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2f5bea">
+<title>ZarghamFlow – Meetings &amp; Tasks</title>
+<style>
+/* ===================== THEME TOKENS ===================== */
+:root{
+  --bg:#f4f6fa; --surface:#ffffff; --surface2:#f0f3f8; --text:#1b2330; --muted:#667085; --border:#e1e6ee;
+  --primary:#2f5bea; --primary-ink:#ffffff; --primary-soft:#e8eeff;
+  --red:#d92d20; --red-soft:#fee4e2; --amber:#b54708; --amber-soft:#fef0c7;
+  --green:#067647; --green-soft:#d1fadf; --grey-soft:#eaecf0; --violet:#6938ef; --violet-soft:#ece9fe;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08);
+  --shadow-lg:0 12px 40px rgba(16,24,40,.25);
+  --radius:12px;
+}
+html[data-theme="dark"]{
+  --bg:#0f141c; --surface:#171d28; --surface2:#1f2633; --text:#e8ecf3; --muted:#9aa4b5; --border:#2a3344;
+  --primary:#6b8cff; --primary-ink:#0b1020; --primary-soft:#222d52;
+  --red:#ff6b5e; --red-soft:#3d1d1b; --amber:#fdb022; --amber-soft:#3a2c0d;
+  --green:#47cd89; --green-soft:#10301f; --grey-soft:#2a3344; --violet:#a48afb; --violet-soft:#2a2150;
+  --shadow:0 1px 2px rgba(0,0,0,.4); --shadow-lg:0 12px 40px rgba(0,0,0,.6);
+}
+
+/* ===================== BASE ===================== */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}
+body.noscroll{overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--primary)}
+h1,h2,h3{margin:0;line-height:1.25}
+.wrap{max-width:1100px;margin:0 auto;padding:0 16px}
+.muted{color:var(--muted)} .small{font-size:12.5px}
+.hide{display:none!important}
+
+/* ===================== HEADER ===================== */
+header.top{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--border)}
+.top-row{display:flex;align-items:center;gap:8px;padding:10px 0;flex-wrap:wrap}
+.brand{font-weight:700;font-size:17px;display:flex;align-items:center;gap:9px;margin-right:auto}
+.logo{width:30px;height:30px;border-radius:9px;background:var(--primary);color:var(--primary-ink);display:grid;place-items:center;font-size:15px;font-weight:800}
+nav.tabs{display:flex;gap:4px;padding-bottom:8px;overflow-x:auto}
+.tab{border:0;background:none;padding:7px 15px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:600;white-space:nowrap}
+.tab:hover{background:var(--surface2)}
+.tab.active{background:var(--primary-soft);color:var(--primary)}
+
+/* ===================== BUTTONS ===================== */
+.btn{border:1px solid var(--border);background:var(--surface);padding:8px 14px;border-radius:9px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--surface2)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{background:var(--red);border-color:var(--red);color:#fff}
+.btn.sm{padding:4px 10px;font-size:13px;border-radius:8px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{background:var(--surface2);color:var(--text)}
+.icon-btn{border:0;background:none;cursor:pointer;width:34px;height:34px;border-radius:8px;color:var(--muted);font-size:16px}
+.icon-btn:hover{background:var(--surface2);color:var(--text)}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ===================== LAYOUT PIECES ===================== */
+main{padding:18px 0 40px}
+.page-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.page-head h1{font-size:22px;margin-right:auto}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.panel{padding:14px 16px;margin-bottom:16px}
+.panel-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.panel-head h2{font-size:16px;margin-right:auto}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.stat{padding:14px 16px;text-align:left;cursor:pointer;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow)}
+.stat:hover{border-color:var(--primary)}
+.stat .num{font-size:28px;font-weight:700;line-height:1.1}
+.stat .lbl{color:var(--muted);font-size:13px}
+.stat.red .num{color:var(--red)}
+.banner{padding:10px 14px;border-radius:10px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--amber-soft);color:var(--amber);font-weight:500}
+.banner.err{background:var(--red-soft);color:var(--red)}
+.banner span{margin-right:auto}
+
+/* ===================== DATE NAV & WEEK ===================== */
+.datenav{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.datenav h2{font-size:18px;margin:0 8px 0 4px}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+.wk-day{display:block;text-align:left;border:1px solid var(--border);background:var(--surface);border-radius:10px;padding:8px;cursor:pointer;min-height:92px;overflow:hidden}
+.wk-day:hover{border-color:var(--primary)}
+.wk-day.is-today{background:var(--primary-soft)}
+.wk-day.sel{outline:2px solid var(--primary);outline-offset:-1px}
+.wk-day>span{display:block}
+.wk-h{display:flex!important;justify-content:space-between;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.wk-n{font-weight:700;font-size:15px;color:var(--text)}
+.wk-m{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
+.wk-t{font-size:11.5px;color:var(--violet);margin-top:3px}
+
+/* ===================== ITEM CARDS ===================== */
+.list{display:flex;flex-direction:column;gap:10px}
+.item{padding:12px 14px;display:flex;gap:12px;border-left:4px solid var(--border)}
+.item.is-today{border-left-color:var(--primary);background:linear-gradient(90deg,var(--primary-soft),var(--surface) 40%)}
+.item.m-cancelled,.item.m-rescheduled{opacity:.7}
+.item.m-cancelled .ttl{text-decoration:line-through}
+.item.overdue{border-left-color:var(--red);background:linear-gradient(90deg,var(--red-soft),var(--surface) 40%)}
+.item.done{opacity:.65}
+.item.done .ttl{text-decoration:line-through}
+.timecol{min-width:58px;font-variant-numeric:tabular-nums;font-weight:700;line-height:1.3}
+.timecol small{display:block;color:var(--muted);font-weight:500;font-size:12px}
+.body{flex:1;min-width:0}
+.ttl{font-weight:600;font-size:15.5px;word-break:break-word}
+.meta{color:var(--muted);font-size:13px;display:flex;gap:6px 12px;flex-wrap:wrap;margin-top:2px}
+.meta .overdue-txt{color:var(--red);font-weight:600}
+.note{font-size:13.5px;margin-top:6px;white-space:pre-wrap;word-break:break-word;color:var(--text)}
+.note b{color:var(--muted);font-weight:600}
+.actions{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
+.warn{margin-top:6px;font-size:13px;color:var(--amber);background:var(--amber-soft);padding:4px 9px;border-radius:7px;display:inline-block}
+.check{width:20px;height:20px;margin-top:2px;accent-color:var(--primary);cursor:pointer;flex:none}
+.day-head{font-size:14px;margin:16px 0 8px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;display:flex;gap:8px;align-items:center}
+.day-head.today{color:var(--primary)}
+.sec-title{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 8px}
+.sec-title:first-child{margin-top:0}
+
+/* ===================== BADGES ===================== */
+.badge{display:inline-block;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:600;background:var(--grey-soft);color:var(--muted);border:0;line-height:1.7}
+button.badge{cursor:pointer}
+.b-green{background:var(--green-soft);color:var(--green)} .b-red{background:var(--red-soft);color:var(--red)}
+.b-amber{background:var(--amber-soft);color:var(--amber)} .b-blue{background:var(--primary-soft);color:var(--primary)}
+.b-violet{background:var(--violet-soft);color:var(--violet)}
+
+/* ===================== FORMS ===================== */
+.quick{display:flex;gap:8px;margin-bottom:6px}
+.quick input{flex:1}
+input,select,textarea{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface);min-width:0}
+textarea{resize:vertical;min-height:70px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--primary);outline-offset:-1px;border-color:transparent}
+input.invalid,select.invalid,textarea.invalid{border-color:var(--red)}
+.err{color:var(--red);font-size:12.5px;min-height:0}
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.field label{font-size:13px;font-weight:600;color:var(--muted)}
+.field label i{color:var(--red);font-style:normal}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 12px}
+.filters{padding:12px 14px;margin-bottom:14px}
+.filters .cols{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px 10px}
+.filters .field{margin-bottom:0}
+.filters-foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+
+/* ===================== MODAL / TOAST ===================== */
+.overlay{position:fixed;inset:0;background:rgba(10,15,25,.55);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow-y:auto}
+.overlay.top{z-index:70;align-items:center}
+.modal{background:var(--surface);border-radius:14px;box-shadow:var(--shadow-lg);width:100%;max-width:620px}
+.modal.small{max-width:430px}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)}
+.modal-head h2{font-size:17px}
+.modal-body{padding:16px 18px 18px}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:6px}
+.empty{text-align:center;padding:28px 16px;color:var(--muted)}
+.empty .big{font-size:30px;margin-bottom:4px}
+.empty p{margin:4px 0 12px}
+#toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:90;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{background:var(--text);color:var(--bg);padding:9px 16px;border-radius:10px;box-shadow:var(--shadow-lg);font-size:14px;max-width:92vw}
+.toast.warn{background:var(--amber);color:#fff}
+.data-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
+footer{color:var(--muted);font-size:12.5px;text-align:center;padding:10px 16px 30px}
+kbd{background:var(--surface2);border:1px solid var(--border);border-bottom-width:2px;border-radius:5px;padding:0 6px;font-size:12px}
+
+/* ===================== NOTIFICATIONS DIALOG ===================== */
+details.help{border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px;background:var(--surface2)}
+details.help summary{cursor:pointer;font-weight:600}
+details.help ol{margin:8px 0 4px;padding-left:20px}
+details.help li{margin-bottom:4px}
+details.help textarea{margin-top:8px}
+.chk{display:flex!important;gap:8px;align-items:center;font-weight:500!important;color:var(--text)!important;font-size:14px!important;margin-bottom:4px}
+.chk input{width:auto;margin:0}
+.chips{display:flex;gap:2px 16px;flex-wrap:wrap;margin:4px 0 4px 24px}
+.status-line{font-size:13.5px;padding:8px 12px;border-radius:9px;background:var(--surface2);margin-bottom:12px}
+.status-line.ok{background:var(--green-soft);color:var(--green)}
+.status-line.bad{background:var(--red-soft);color:var(--red)}
+code{background:var(--surface2);padding:0 5px;border-radius:5px;font-size:12.5px}
+#sync-state{font-size:12px}
+
+/* ===================== RESPONSIVE ===================== */
+@media (max-width:820px){
+  .grid-2{grid-template-columns:1fr}
+  .week{grid-template-columns:1fr}
+  .wk-day{min-height:0}
+  .wk-h{justify-content:flex-start!important;gap:10px}
+}
+@media (max-width:520px){
+  .item{flex-direction:column;gap:6px}
+  .timecol{display:flex;gap:8px;align-items:baseline}
+  .timecol small{display:inline}
+  .data-grid{grid-template-columns:1fr}
+  .btn .lbl-long{display:none}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="top-row">
+      <div class="brand"><span class="logo">Z</span> ZarghamFlow</div>
+      <button class="btn primary" data-action="new-meeting" title="New meeting (N)">+ Meeting</button>
+      <button class="btn primary" data-action="new-task" title="New task (T)">+ Task</button>
+      <button class="btn" data-action="open-data" title="Backup, import &amp; export">Data</button>
+      <button class="btn" data-action="open-notify" title="Email reminders &amp; Google Calendar">🔔 <span class="lbl-long">Reminders</span> <span id="sync-state"></span></button>
+      <button class="icon-btn" data-action="toggle-theme" id="theme-btn" title="Toggle light / dark" aria-label="Toggle theme">☾</button>
+    </div>
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab" data-action="nav" data-view="dashboard">Dashboard</button>
+      <button class="tab" data-action="nav" data-view="meetings">Meetings</button>
+      <button class="tab" data-action="nav" data-view="tasks">Tasks</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap"><div id="app"></div></main>
+<footer>Shortcuts: <kbd>N</kbd> new meeting · <kbd>T</kbd> new task · <kbd>/</kbd> search · <kbd>Esc</kbd> close. Saved in this browser; connect Google to sync a copy to Sheets.</footer>
+
+<div id="modal-root"></div>
+<div id="confirm-root"></div>
+<div id="toast" aria-live="polite"></div>
+<input type="file" id="import-file" accept=".json,application/json" class="hide">
+<noscript><div class="wrap"><p>This app needs JavaScript enabled.</p></div></noscript>
+
+<!-- Google Apps Script companion (copied into script.google.com from the 🔔 dialog; never executed here) -->
+<script type="text/plain" id="gas-template">
+/**
+ * ZarghamFlow – Google companion script
+ * Runs inside YOUR Google account. It
+ *   1) stores meetings and tasks in a private Google spreadsheet,
+ *   2) adds / updates / removes your meetings in Google Calendar, and
+ *   3) emails you reminders (task deadlines, upcoming meetings, follow-ups) every 5 minutes,
+ *      even when the ZarghamFlow page is closed.
+ * Deploy as: Web app · Execute as: Me · Who has access: Anyone.
+ * Only requests that carry the secret TOKEN below are accepted.
+ */
+var TOKEN = '__TOKEN__';
+var P = PropertiesService.getScriptProperties();
+var CHUNK = 3000;
+
+/* ---------------- Web app entry points ---------------- */
+function doGet() { return out_({ ok: true, message: 'ZarghamFlow script is running.' }); }
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(25000);
+    var body = JSON.parse(e.postData.contents);
+    if (body.token !== TOKEN) return out_({ ok: false, error: 'Wrong token – copy the setup script again from the app.' });
+    if (body.action === 'test') return out_(test_(body));
+    if (body.action === 'load') return out_(loadDatabase_());
+    if (body.action === 'sync') return out_(sync_(body));
+    return out_({ ok: false, error: 'Unknown action' });
+  } catch (err) {
+    return out_({ ok: false, error: String(err) });
+  } finally {
+    try { lock.releaseLock(); } catch (x) {}
+  }
+}
+
+function out_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ---------------- Small helpers ---------------- */
+function validEmail_(s) { return typeof s === 'string' && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s); }
+function esc_(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+/* Script properties hold max 9 KB per value, so larger JSON is stored in chunks */
+function setBig_(key, str) {
+  var n = Math.ceil(str.length / CHUNK) || 1, old = Number(P.getProperty(key + '#n') || 0), o = {}, i;
+  o[key + '#n'] = String(n);
+  for (i = 0; i < n; i++) o[key + '#' + i] = str.substr(i * CHUNK, CHUNK);
+  P.setProperties(o);
+  for (i = n; i < old; i++) P.deleteProperty(key + '#' + i);
+}
+function getBig_(key) {
+  var n = Number(P.getProperty(key + '#n') || 0), s = '', i;
+  for (i = 0; i < n; i++) s += P.getProperty(key + '#' + i) || '';
+  return s;
+}
+
+function ensureTrigger_() {
+  var exists = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'checkReminders'; });
+  if (!exists) ScriptApp.newTrigger('checkReminders').timeBased().everyMinutes(5).create();
+}
+
+function ensureDatabase_() {
+  var id = P.getProperty('databaseId'), ss;
+  if (id) ss = SpreadsheetApp.openById(id);
+  else {
+    ss = SpreadsheetApp.create('ZarghamFlow Database');
+    P.setProperty('databaseId', ss.getId());
+  }
+  var meetings = ss.getSheetByName('Meetings');
+  if (!meetings) { meetings = ss.getSheets()[0]; meetings.setName('Meetings'); }
+  var tasks = ss.getSheetByName('Tasks') || ss.insertSheet('Tasks');
+  [meetings, tasks].forEach(function (sheet) {
+    if (sheet.getLastRow() === 0) sheet.getRange(1, 1, 1, 2).setValues([['id', 'record_json']]);
+  });
+  return ss;
+}
+
+function readRecords_(sheet) {
+  var last = sheet.getLastRow();
+  if (last < 2) return [];
+  return sheet.getRange(2, 1, last - 1, 2).getValues().map(function (row) {
+    try { return JSON.parse(row[1]); } catch (e) { return null; }
+  }).filter(function (record) { return record && typeof record === 'object' && record.id; });
+}
+
+function writeRecords_(sheet, records) {
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, 2).setValues([['id', 'record_json']]);
+  if (records.length) {
+    sheet.getRange(2, 1, records.length, 2).setValues(records.map(function (record) {
+      return [String(record.id || ''), JSON.stringify(record)];
+    }));
+  }
+}
+
+function loadDatabase_() {
+  var ss = ensureDatabase_();
+  return {
+    ok: true,
+    initialized: P.getProperty('databaseInitialized') === 'true',
+    databaseUrl: ss.getUrl(),
+    meetings: readRecords_(ss.getSheetByName('Meetings')),
+    tasks: readRecords_(ss.getSheetByName('Tasks'))
+  };
+}
+
+/* ---------------- Test ---------------- */
+function test_(b) {
+  var user = Session.getEffectiveUser().getEmail();
+  CalendarApp.getDefaultCalendar().getName();               // makes sure Calendar permission is granted
+  var sent = false;
+  if (validEmail_(b.email)) {
+    MailApp.sendEmail({
+      to: b.email, name: 'ZarghamFlow', subject: 'ZarghamFlow – test email',
+      body: 'It works! You will receive task, meeting and follow-up reminders at this address.'
+    });
+    sent = true;
+  }
+  ensureTrigger_();
+  return { ok: true, user: user, emailSent: sent };
+}
+
+/* ---------------- Sync: calendar + store data for reminders ---------------- */
+function sync_(b) {
+  var tz = b.tz || Session.getScriptTimeZone(), prefs = b.prefs || {};
+  var records = b.records || {}, ss = ensureDatabase_();
+  writeRecords_(ss.getSheetByName('Meetings'), Array.isArray(records.meetings) ? records.meetings : []);
+  writeRecords_(ss.getSheetByName('Tasks'), Array.isArray(records.tasks) ? records.tasks : []);
+  P.setProperty('databaseInitialized', 'true');
+  var cal = syncCalendar_(b, tz, prefs);
+  var keep = (b.meetings || []).map(function (m) {
+    return { id: m.id, title: m.title, date: m.date, start: m.start, end: m.end, client: m.client, location: m.location, followUp: m.followUp, status: m.status };
+  });
+  setBig_('data', JSON.stringify({ email: b.email, tz: tz, prefs: prefs, tasks: b.tasks || [], meetings: keep }));
+  ensureTrigger_();
+  return { ok: true, calendar: cal, tasks: (records.tasks || []).length, meetings: (records.meetings || []).length, databaseUrl: ss.getUrl() };
+}
+
+function safeGet_(calendar, id) { try { return calendar.getEventById(id); } catch (e) { return null; } }
+function delEvent_(calendar, entry) { var ev = safeGet_(calendar, entry.e); if (ev) { try { ev.deleteEvent(); } catch (e) {} } }
+
+/* Only touches events this script created (tracked in "calmap") – never your other events */
+function syncCalendar_(b, tz, prefs) {
+  var res = { created: 0, updated: 0, deleted: 0, errors: 0 };
+  var map = JSON.parse(getBig_('calmap') || '{}');
+  var calendar = CalendarApp.getDefaultCalendar();
+  var all = {};
+  (b.allMeetingIds || []).forEach(function (id) { all[id] = 1; });
+
+  Object.keys(map).forEach(function (id) {                  // meeting deleted in the app → remove event
+    if (!all[id]) { delEvent_(calendar, map[id]); delete map[id]; res.deleted++; }
+  });
+  if (prefs.calendarOn === false) { setBig_('calmap', JSON.stringify(map)); return res; }
+
+  (b.meetings || []).forEach(function (m) {
+    var active = m.cal && (m.status === 'Scheduled' || m.status === 'Completed');
+    var cur = map[m.id];
+    try {
+      if (!active) { if (cur) { delEvent_(calendar, cur); delete map[m.id]; res.deleted++; } return; }
+      var start = Utilities.parseDate(m.date + ' ' + m.start, tz, 'yyyy-MM-dd HH:mm');
+      var end = Utilities.parseDate(m.date + ' ' + m.end, tz, 'yyyy-MM-dd HH:mm');
+      var lead = Math.max(1, Math.min(prefs.meetingLeadMinutes || 30, 40320));
+      var sig = [m.title, m.date, m.start, m.end, m.location, m.client, m.contacts, m.type, m.notes, lead].join('|');
+      if (cur && cur.s === sig) return;                     // unchanged
+      var desc = [m.type + (m.client ? ' · ' + m.client : ''), m.contacts ? 'With: ' + m.contacts : '', m.notes ? '\nAgenda / notes:\n' + m.notes : '', '\n— ZarghamFlow']
+        .filter(function (x) { return x; }).join('\n');
+      var ev = cur ? safeGet_(calendar, cur.e) : null;
+      if (ev) { ev.setTitle(m.title); ev.setTime(start, end); ev.setLocation(m.location || ''); ev.setDescription(desc); res.updated++; }
+      else { ev = calendar.createEvent(m.title, start, end, { location: m.location || '', description: desc }); res.created++; }
+      ev.removeAllReminders();
+      ev.addPopupReminder(lead);
+      map[m.id] = { e: ev.getId(), s: sig };
+    } catch (err) { res.errors++; res.lastError = String(err); }
+  });
+  setBig_('calmap', JSON.stringify(map));
+  return res;
+}
+
+/* ---------------- Reminder emails (runs every 5 minutes via trigger) ---------------- */
+function checkReminders() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) return;
+  try {
+    var raw = getBig_('data');
+    if (!raw) return;
+    var d = JSON.parse(raw), prefs = d.prefs || {}, tz = d.tz || Session.getScriptTimeZone();
+    if (!validEmail_(d.email) || prefs.emailOn === false) return;
+
+    var now = Date.now(), sent = JSON.parse(getBig_('sent') || '{}'), items = [], keys = [];
+    var DAY = 864e5;
+    function ts(date, time) { return Utilities.parseDate(date + ' ' + time, tz, 'yyyy-MM-dd HH:mm').getTime(); }
+    function fmt(ms, pat) { return Utilities.formatDate(new Date(ms), tz, pat); }
+    var taskLead = (prefs.taskLeadHours || 24) * 3600000, meetLead = (prefs.meetingLeadMinutes || 60) * 60000;
+
+    (d.tasks || []).forEach(function (t) {
+      var timed = !!t.dueTime;
+      var ref = ts(t.dueDate, timed ? t.dueTime : '09:00');         // date-only tasks: window opens 09:00
+      var end = ts(t.dueDate, timed ? t.dueTime : '23:59');         // …and they are due by end of day
+      var base = t.id + ':' + t.dueDate + (t.dueTime || '');
+      var detail = 'Due ' + (timed ? fmt(end, 'EEE d MMM, HH:mm') : fmt(end, 'EEE d MMM')) +
+        (t.client ? ' · ' + t.client : '') + ' · ' + t.priority + ' priority · ' + t.category;
+      if (now >= ref - taskLead && now < end && !sent['s:' + base]) {
+        items.push({ label: 'Task due soon', title: t.title, detail: detail }); keys.push('s:' + base);
+      } else if (prefs.overdueOn !== false && now >= end && now < end + 3 * DAY && !sent['o:' + base]) {
+        items.push({ label: 'Task OVERDUE', title: t.title, detail: detail }); keys.push('o:' + base);
+      }
+    });
+
+    (d.meetings || []).forEach(function (m) {
+      if (m.status === 'Scheduled') {
+        var st = ts(m.date, m.start), k = 'm:' + m.id + ':' + m.date + m.start;
+        if (now >= st - meetLead && now < st && !sent[k]) {
+          items.push({ label: 'Meeting starting soon', title: m.title,
+            detail: fmt(st, 'EEE d MMM, HH:mm') + '–' + m.end + (m.client ? ' · ' + m.client : '') + (m.location ? ' · ' + m.location : '') });
+          keys.push(k);
+        }
+      }
+      if (prefs.followUpOn !== false && m.followUp && m.status !== 'Cancelled') {
+        var f = ts(m.followUp, '08:00'), kf = 'f:' + m.id + ':' + m.followUp;
+        if (now >= f && now < f + DAY && !sent[kf]) {
+          items.push({ label: 'Follow-up due today', title: m.title, detail: 'After your meeting on ' + m.date + (m.client ? ' · ' + m.client : '') });
+          keys.push(kf);
+        }
+      }
+    });
+
+    Object.keys(sent).forEach(function (k) { if (now - sent[k] > 45 * DAY) delete sent[k]; });   // tidy old keys
+    if (!items.length) { setBig_('sent', JSON.stringify(sent)); return; }
+
+    var subject = items.length === 1 ? 'ZarghamFlow: ' + items[0].label + ' – ' + items[0].title : 'ZarghamFlow: ' + items.length + ' reminders';
+    var text = items.map(function (i) { return i.label.toUpperCase() + '\n' + i.title + '\n' + i.detail; }).join('\n\n');
+    var html = '<div style="font-family:Arial,sans-serif;font-size:14px;color:#1b2330">' + items.map(function (i) {
+      return '<div style="border-left:4px solid ' + (/OVERDUE/.test(i.label) ? '#d92d20' : '#2f5bea') + ';padding:4px 12px;margin:0 0 14px">' +
+        '<div style="font-size:12px;color:#667085;text-transform:uppercase;letter-spacing:.04em">' + esc_(i.label) + '</div>' +
+        '<div style="font-size:16px;font-weight:600">' + esc_(i.title) + '</div><div style="color:#667085">' + esc_(i.detail) + '</div></div>';
+    }).join('') + '<div style="font-size:12px;color:#98a2b3">Sent by your ZarghamFlow script.</div></div>';
+
+    MailApp.sendEmail({ to: d.email, name: 'ZarghamFlow', subject: subject, body: text, htmlBody: html });
+    keys.forEach(function (k) { sent[k] = now; });          // mark as sent only after the mail went out
+    setBig_('sent', JSON.stringify(sent));
+  } finally {
+    try { lock.releaseLock(); } catch (x) {}
+  }
+}
+</script>
+
+<script>
+'use strict';
+/* =====================================================================
+   BD PLANNER – single-file app
+   Sections: 1 Constants & utils · 2 Data layer · 3 Queries ·
+             4 UI rendering · 5 Forms & modals · 6 Import / export ·
+             7 Event handling · 8 Init
+   ===================================================================== */
+
+/* ===================== 1. CONSTANTS & UTILS ===================== */
+const STORAGE_KEY = 'bdm-planner-v1';
+const MEETING_TYPES = ['Call', 'Video', 'In-person', 'Lunch', 'Conference'];
+const MEETING_STATUSES = ['Scheduled', 'Completed', 'Cancelled', 'Rescheduled'];
+const PRIORITIES = ['High', 'Medium', 'Low'];
+const TASK_STATUSES = ['To Do', 'In Progress', 'Done'];
+const CATEGORIES = ['Prospecting', 'Proposal', 'Follow-up', 'Admin', 'Other'];
+const DURATIONS = [15, 30, 45, 60, 90, 120, 180];
+const PRIORITY_RANK = { High: 0, Medium: 1, Low: 2 };
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const pickNum = (v, list, def) => list.includes(Number(v)) ? Number(v) : def;
+const defaultNotify = () => ({
+  email: '', scriptUrl: '', token: '', emailOn: true, taskLeadHours: 24, meetingLeadMinutes: 60, overdueOn: true, followUpOn: true,
+  calendarOn: true, calendarTypes: MEETING_TYPES.slice(), lastSync: '', lastStatus: '', lastSig: '', databaseUrl: ''
+});
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+const str = (v, max = 2000) => typeof v === 'string' ? v.slice(0, max) : (v == null ? '' : String(v).slice(0, max));
+const pick = (v, list, def) => list.includes(v) ? v : def;
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const shorten = (s, n) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+
+/* ---- Dates are plain local "YYYY-MM-DD" strings; times are "HH:MM" (24h) ---- */
+const toISO = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+function parseISO(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return (d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3]) ? d : null;
+}
+const isValidDate = s => !!parseISO(s);
+const today = () => toISO(new Date());
+const nowHM = () => { const d = new Date(); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+function addDays(iso, n) { const d = parseISO(iso); d.setDate(d.getDate() + n); return toISO(d); }
+function weekStart(iso) { const d = parseISO(iso); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return toISO(d); } // Monday
+function fmtDate(iso, opts) {
+  const d = parseISO(iso); if (!d) return iso || '';
+  return new Intl.DateTimeFormat('en-GB', opts || { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(d);
+}
+/* Normalise free-typed time ("9", "930", "9:30", "14.30") to "HH:MM" or null */
+function normTime(s) {
+  s = String(s == null ? '' : s).trim();
+  if (!s) return null;
+  const m = /^(\d{1,2})(?:[:.h]?(\d{2}))?$/.exec(s);
+  if (!m) return null;
+  const h = +m[1], mi = m[2] ? +m[2] : 0;
+  return (h > 23 || mi > 59) ? null : pad(h) + ':' + pad(mi);
+}
+const toMin = hm => { const [h, m] = hm.split(':').map(Number); return h * 60 + m; };
+const fromMin = n => pad(Math.floor(n / 60)) + ':' + pad(n % 60);
+
+/* ===================== 2. DATA LAYER ===================== */
+const DB = { meetings: [], tasks: [], settings: { theme: null, lastBackup: null, notify: defaultNotify() } };
+let storageOK = true;
+
+/* ---- Sanitisers: used on load and import so bad data can never break the UI ---- */
+function cleanMeeting(m) {
+  if (!m || typeof m !== 'object') return null;
+  const title = str(m.title, 200).trim(), date = str(m.date, 10);
+  if (!title || !isValidDate(date)) return null;
+  const start = normTime(m.start) || '09:00';
+  let end = normTime(m.end);
+  if (!end || toMin(end) <= toMin(start)) end = fromMin(Math.min(toMin(start) + 60, 1439));
+  const fu = str(m.followUp, 10);
+  return {
+    id: str(m.id, 40) || uid(), title, date, start, end,
+    client: str(m.client, 200).trim(), contacts: str(m.contacts, 400).trim(),
+    type: pick(m.type, MEETING_TYPES, 'Video'), location: str(m.location, 500).trim(),
+    notes: str(m.notes, 8000), outcome: str(m.outcome, 8000),
+    status: pick(m.status, MEETING_STATUSES, 'Scheduled'),
+    followUp: isValidDate(fu) ? fu : '', createdAt: str(m.createdAt, 40) || new Date().toISOString()
+  };
+}
+function cleanTask(t) {
+  if (!t || typeof t !== 'object') return null;
+  const title = str(t.title, 200).trim(), due = str(t.dueDate, 10);
+  if (!title) return null;
+  const status = pick(t.status, TASK_STATUSES, 'To Do');
+  return {
+    id: str(t.id, 40) || uid(), title, dueDate: isValidDate(due) ? due : today(), dueTime: normTime(t.dueTime) || '',
+    priority: pick(t.priority, PRIORITIES, 'Medium'), status, category: pick(t.category, CATEGORIES, 'Other'),
+    client: str(t.client, 200).trim(), meetingId: str(t.meetingId, 40), notes: str(t.notes, 8000),
+    completedAt: status === 'Done' ? (str(t.completedAt, 40) || new Date().toISOString()) : '',
+    createdAt: str(t.createdAt, 40) || new Date().toISOString()
+  };
+}
+function cleanNotify(n) {
+  const d = defaultNotify();
+  if (!n || typeof n !== 'object') return d;
+  return {
+    email: str(n.email, 200).trim(), scriptUrl: str(n.scriptUrl, 400).trim(), token: str(n.token, 80),
+    emailOn: n.emailOn !== false, taskLeadHours: pickNum(n.taskLeadHours, [1, 3, 6, 12, 24, 48], 24),
+    meetingLeadMinutes: pickNum(n.meetingLeadMinutes, [15, 30, 60, 120, 1440], 60),
+    overdueOn: n.overdueOn !== false, followUpOn: n.followUpOn !== false, calendarOn: n.calendarOn !== false,
+    calendarTypes: Array.isArray(n.calendarTypes) ? n.calendarTypes.filter(t => MEETING_TYPES.includes(t)) : d.calendarTypes,
+    lastSync: str(n.lastSync, 40), lastStatus: str(n.lastStatus, 300), lastSig: str(n.lastSig, 64), databaseUrl: str(n.databaseUrl, 500)
+  };
+}
+function ingest(data, merge) {
+  const ms = (Array.isArray(data.meetings) ? data.meetings : []).map(cleanMeeting).filter(Boolean);
+  const ts = (Array.isArray(data.tasks) ? data.tasks : []).map(cleanTask).filter(Boolean);
+  if (!merge) { DB.meetings = []; DB.tasks = []; }
+  const upsert = (arr, item) => { const i = arr.findIndex(x => x.id === item.id); if (i >= 0) arr[i] = item; else arr.push(item); };
+  ms.forEach(m => upsert(DB.meetings, m));
+  ts.forEach(t => upsert(DB.tasks, t));
+  return { meetings: ms.length, tasks: ts.length };
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const data = JSON.parse(raw);
+      ingest(data, false);
+      if (data.settings && typeof data.settings === 'object') {
+        DB.settings.theme = pick(data.settings.theme, ['light', 'dark'], null);
+        DB.settings.lastBackup = str(data.settings.lastBackup, 40) || null;
+        DB.settings.notify = cleanNotify(data.settings.notify);
+      }
+    }
+  } catch (e) { storageOK = false; console.error('Load failed', e); }
+}
+function save() { const ok = persist(); if (ok) scheduleSync(); return ok; }   // every data change also syncs to Google (if connected)
+function persist() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, meetings: DB.meetings, tasks: DB.tasks, settings: DB.settings }));
+    return true;
+  } catch (e) { storageOK = false; toast('Could not save to browser storage – export a backup!', 'warn'); return false; }
+}
+
+/* ---- Meetings CRUD ---- */
+function saveMeeting(data, id) {
+  if (id) { const i = DB.meetings.findIndex(m => m.id === id); if (i >= 0) DB.meetings[i] = Object.assign({}, DB.meetings[i], data); }
+  else DB.meetings.push(Object.assign({ id: uid(), createdAt: new Date().toISOString() }, data));
+  save();
+}
+function deleteMeeting(id) {
+  DB.meetings = DB.meetings.filter(m => m.id !== id);
+  DB.tasks.forEach(t => { if (t.meetingId === id) t.meetingId = ''; }); // unlink tasks
+  save();
+}
+/* ---- Tasks CRUD ---- */
+function setTaskStatus(t, status) {
+  t.status = status;
+  t.completedAt = status === 'Done' ? (t.completedAt || new Date().toISOString()) : '';
+}
+function saveTask(data, id) {
+  if (id) {
+    const t = DB.tasks.find(x => x.id === id);
+    if (t) { Object.assign(t, data); setTaskStatus(t, data.status); }
+  } else {
+    const t = Object.assign({ id: uid(), createdAt: new Date().toISOString(), completedAt: '' }, data);
+    setTaskStatus(t, t.status); DB.tasks.push(t);
+  }
+  save();
+}
+function deleteTask(id) { DB.tasks = DB.tasks.filter(t => t.id !== id); save(); }
+
+/* ===================== 3. QUERIES & BUSINESS RULES ===================== */
+const meetingSort = (a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start);
+const taskSort = (a, b) =>
+  ((a.status === 'Done') - (b.status === 'Done')) ||
+  (a.dueDate || '9').localeCompare(b.dueDate || '9') ||
+  (a.dueTime || '99:99').localeCompare(b.dueTime || '99:99') ||
+  (PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
+const isActiveMeeting = m => m.status === 'Scheduled' || m.status === 'Completed';
+const meetingsOn = d => DB.meetings.filter(m => m.date === d).sort(meetingSort);
+const findMeeting = id => DB.meetings.find(m => m.id === id);
+function isOverdue(t) {
+  if (t.status === 'Done' || !t.dueDate) return false;
+  const T = today();
+  return t.dueDate < T || (t.dueDate === T && !!t.dueTime && t.dueTime < nowHM());
+}
+/* Meetings overlapping `m` (same day, both active). `m` may be an unsaved draft. */
+function overlapsOf(m) {
+  if (!isActiveMeeting(m)) return [];
+  const a1 = toMin(m.start), a2 = toMin(m.end);
+  return DB.meetings.filter(o => o.id !== m.id && o.date === m.date && isActiveMeeting(o) && a1 < toMin(o.end) && toMin(o.start) < a2);
+}
+function allClients() {
+  const set = new Set();
+  DB.meetings.forEach(m => m.client && set.add(m.client));
+  DB.tasks.forEach(t => t.client && set.add(t.client));
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+function dateOk(date, f) {
+  if (f.from || f.to) return !(f.from && date < f.from) && !(f.to && date > f.to);
+  const T = today();
+  switch (f.range) {
+    case 'today': return date === T;
+    case 'week': { const ws = weekStart(T); return date >= ws && date <= addDays(ws, 6); }
+    case 'upcoming': return date >= T;
+    case 'past': return date < T;
+    default: return true;
+  }
+}
+
+/* ---- UI state (not persisted) ---- */
+const defaultMF = () => ({ q: '', range: 'upcoming', from: '', to: '', client: '', status: '', type: '' });
+const defaultTF = () => ({ q: '', range: 'all', from: '', to: '', client: '', status: 'open', priority: '', category: '' });
+const ui = { view: 'dashboard', selDate: today(), mf: defaultMF(), tf: defaultTF() };
+
+function filterMeetings() {
+  const f = ui.mf, q = f.q.trim().toLowerCase();
+  return DB.meetings.filter(m => {
+    if (q && !(m.title + ' ' + m.client + ' ' + m.contacts + ' ' + m.location + ' ' + m.notes + ' ' + m.outcome).toLowerCase().includes(q)) return false;
+    if (f.client && m.client !== f.client) return false;
+    if (f.status && m.status !== f.status) return false;
+    if (f.type && m.type !== f.type) return false;
+    return dateOk(m.date, f);
+  }).sort(meetingSort);
+}
+function filterTasks() {
+  const f = ui.tf, q = f.q.trim().toLowerCase();
+  return DB.tasks.filter(t => {
+    const lm = findMeeting(t.meetingId), client = t.client || (lm ? lm.client : '');
+    if (q && !(t.title + ' ' + client + ' ' + t.notes + ' ' + (lm ? lm.title : '')).toLowerCase().includes(q)) return false;
+    if (f.client && client !== f.client) return false;
+    if (f.status === 'open' ? t.status === 'Done' : (f.status && t.status !== f.status)) return false;
+    if (f.priority && t.priority !== f.priority) return false;
+    if (f.category && t.category !== f.category) return false;
+    if (f.range === 'overdue' && !(f.from || f.to)) return isOverdue(t);
+    return dateOk(t.dueDate, f);
+  }).sort(taskSort);
+}
+
+/* ===================== 4. UI RENDERING ===================== */
+const opt = (list, sel) => list.map(v => `<option${v === sel ? ' selected' : ''}>${esc(v)}</option>`).join('');
+const statusBadge = s => `<span class="badge ${({ Scheduled: 'b-blue', Completed: 'b-green', Cancelled: 'b-red', Rescheduled: 'b-amber' })[s]}">${esc(s)}</span>`;
+const prioBadge = p => `<span class="badge ${({ High: 'b-red', Medium: 'b-amber', Low: 'b-grey' })[p] || ''}">${esc(p)}</span>`;
+const emptyBox = (icon, title, text, btn) =>
+  `<div class="empty"><div class="big">${icon}</div><strong>${esc(title)}</strong><p>${text}</p>${btn || ''}</div>`;
+
+function render() {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.view === ui.view));
+  $('#app').innerHTML = ui.view === 'meetings' ? viewMeetings() : ui.view === 'tasks' ? viewTasks() : viewDashboard();
+  if (ui.view !== 'dashboard') renderList();
+  updateBadge();
+}
+function renderList() {
+  const el = $('#list'); if (!el) return;
+  el.innerHTML = ui.view === 'meetings' ? meetingsListHTML() : tasksListHTML();
+}
+function notices() {
+  let h = '';
+  if (!storageOK) h += `<div class="banner err"><span>Browser storage is unavailable, so changes won't be kept after you close this page. Use Data → Export JSON to save your work.</span></div>`;
+  const has = DB.meetings.length + DB.tasks.length > 0;
+  if (has && storageOK) {
+    const lb = DB.settings.lastBackup, days = lb ? Math.floor((Date.now() - new Date(lb).getTime()) / 864e5) : null;
+    if (days === null || days >= 7)
+      h += `<div class="banner"><span>${days === null ? "You haven't made a backup yet." : `Last backup was ${days} days ago.`} Keep your data safe with a quick export.</span><button class="btn sm" data-action="export-json">Back up now</button></div>`;
+  }
+  return h;
+}
+
+/* ---------- Meeting card ---------- */
+function meetingCard(m) {
+  const ov = overlapsOf(m), linked = DB.tasks.filter(t => t.meetingId === m.id);
+  const dur = toMin(m.end) - toMin(m.start);
+  const loc = !m.location ? '' : /^https?:\/\//i.test(m.location)
+    ? `<a href="${esc(m.location)}" target="_blank" rel="noopener noreferrer">${esc(shorten(m.location, 46))}</a>` : esc(m.location);
+  const who = [m.client, m.contacts].filter(Boolean).map(esc).join(' · ');
+  return `<article class="card item m-${m.status.toLowerCase()} ${m.date === today() ? 'is-today' : ''}">
+    <div class="timecol">${m.start}<small>– ${m.end} · ${dur}m</small></div>
+    <div class="body">
+      <div class="ttl">${esc(m.title)} ${statusBadge(m.status)} <span class="badge">${esc(m.type)}</span></div>
+      <div class="meta">${who ? `<span>${who}</span>` : ''}${loc ? `<span>📍 ${loc}</span>` : ''}${m.followUp ? `<span>↻ Follow-up ${fmtDate(m.followUp, { day: 'numeric', month: 'short' })}</span>` : ''}${linked.length ? `<span>☑ ${linked.length} linked task${linked.length > 1 ? 's' : ''}</span>` : ''}</div>
+      ${ov.length ? `<div class="warn">⚠ Overlaps with ${ov.map(o => esc(o.start + ' ' + shorten(o.title, 30))).join(', ')}</div>` : ''}
+      ${m.notes ? `<div class="note"><b>Agenda / notes:</b> ${esc(shorten(m.notes, 400))}</div>` : ''}
+      ${m.outcome ? `<div class="note"><b>Outcome / next steps:</b> ${esc(shorten(m.outcome, 400))}</div>` : ''}
+      <div class="actions">
+        ${m.status === 'Scheduled' ? `<button class="btn sm" data-action="complete-meeting" data-id="${m.id}">✓ Complete</button>` : ''}
+        <button class="btn sm" data-action="edit-meeting" data-id="${m.id}">Edit</button>
+        <button class="btn sm ghost" data-action="dup-meeting" data-id="${m.id}">Duplicate</button>
+        <button class="btn sm ghost" data-action="meeting-task" data-id="${m.id}">+ Task</button>
+        ${isActiveMeeting(m) ? `<a class="btn sm ghost" href="${esc(gcalURL(m))}" target="_blank" rel="noopener noreferrer" title="Add this meeting to Google Calendar">📅 Calendar</a><button class="btn sm ghost" data-action="ics-meeting" data-id="${m.id}" title="Download .ics file">.ics</button>` : ''}
+        <button class="btn sm ghost" data-action="del-meeting" data-id="${m.id}">Delete</button>
+      </div>
+    </div></article>`;
+}
+
+/* ---------- Task card ---------- */
+function taskCard(t) {
+  const od = isOverdue(t), lm = findMeeting(t.meetingId), client = t.client || (lm ? lm.client : '');
+  const catCls = 'b-violet';
+  return `<article class="card item ${od ? 'overdue' : ''} ${t.status === 'Done' ? 'done' : ''}">
+    <input type="checkbox" class="check" data-action="toggle-task" data-id="${t.id}" ${t.status === 'Done' ? 'checked' : ''} aria-label="Mark done">
+    <div class="body">
+      <div class="ttl">${esc(t.title)} ${prioBadge(t.priority)} <span class="badge ${catCls}">${esc(t.category)}</span>
+        <button class="badge ${t.status === 'Done' ? 'b-green' : t.status === 'In Progress' ? 'b-blue' : ''}" data-action="cycle-task" data-id="${t.id}" title="Click to change status">${esc(t.status)}</button></div>
+      <div class="meta">
+        <span class="${od ? 'overdue-txt' : ''}">${od ? '⚠ Overdue · ' : '⏰ '}${fmtDate(t.dueDate, { weekday: 'short', day: 'numeric', month: 'short' })}${t.dueTime ? ' ' + t.dueTime : ''}</span>
+        ${client ? `<span>${esc(client)}</span>` : ''}
+        ${lm ? `<span>🔗 ${esc(shorten(lm.title, 40))} (${fmtDate(lm.date, { day: 'numeric', month: 'short' })})</span>` : ''}
+      </div>
+      ${t.notes ? `<div class="note">${esc(shorten(t.notes, 300))}</div>` : ''}
+      <div class="actions">
+        <button class="btn sm" data-action="edit-task" data-id="${t.id}">Edit</button>
+        <button class="btn sm ghost" data-action="del-task" data-id="${t.id}">Delete</button>
+      </div>
+    </div></article>`;
+}
+
+/* ---------- Quick-add bar ---------- */
+const quickBar = () => `<form class="quick" data-form="quick" autocomplete="off">
+  <input id="quick-input" maxlength="200" placeholder='Quick add task… e.g. Send proposal to Acme tomorrow 14:00 !high #proposal' aria-label="Quick add task">
+  <button class="btn primary" type="submit">Add</button></form>
+  <div class="small muted" style="margin-bottom:14px">Understands: <b>today · tomorrow · mon–sun · in 3 days · 2026-10-21 · 21.10</b> · time <b>14:30</b> · <b>!high !med !low</b> · <b>#prospecting #proposal #follow-up #admin</b>. No date = today.</div>`;
+
+/* ---------- Dashboard ---------- */
+function viewDashboard() {
+  const T = today(), sel = ui.selDate, ws = weekStart(T), we = addDays(ws, 6);
+  const open = DB.tasks.filter(t => t.status !== 'Done');
+  const overdue = open.filter(isOverdue).sort(taskSort);
+  const meetWeek = DB.meetings.filter(m => isActiveMeeting(m) && m.date >= ws && m.date <= we).length;
+  const doneWeek = DB.tasks.filter(t => t.status === 'Done' && t.completedAt && toISO(new Date(t.completedAt)) >= ws && toISO(new Date(t.completedAt)) <= we).length;
+
+  const dayM = meetingsOn(sel);
+  const dayT = DB.tasks.filter(t => t.dueDate === sel && !isOverdue(t)).sort(taskSort);
+  const dayF = DB.meetings.filter(m => m.followUp === sel && m.status !== 'Cancelled');
+  const title = sel === T ? 'Today' : fmtDate(sel, { weekday: 'long' });
+
+  return `${notices()}
+  <div class="page-head"><h1>Dashboard</h1></div>
+  <div class="stats">
+    <button class="stat" data-action="goto-meetings-week"><div class="num">${meetWeek}</div><div class="lbl">Meetings this week</div></button>
+    <button class="stat" data-action="goto-open"><div class="num">${open.length}</div><div class="lbl">Open tasks</div></button>
+    <button class="stat ${overdue.length ? 'red' : ''}" data-action="goto-overdue"><div class="num">${overdue.length}</div><div class="lbl">Overdue tasks</div></button>
+    <button class="stat" data-action="goto-done"><div class="num">${doneWeek}</div><div class="lbl">Completed this week</div></button>
+  </div>
+  ${quickBar()}
+  <div class="datenav">
+    <button class="btn" data-action="day-prev" aria-label="Previous day">‹</button>
+    <button class="btn" data-action="day-next" aria-label="Next day">›</button>
+    <h2>${title} <span class="muted" style="font-weight:500;font-size:15px">${fmtDate(sel)}</span></h2>
+    <button class="btn" data-action="day-today"${sel === T ? ' disabled' : ''}>Today</button>
+    <input type="date" data-role="jump" value="${sel}" style="width:auto" aria-label="Jump to date">
+  </div>
+  ${overdue.length ? `<section class="card panel" style="border-color:var(--red)"><div class="panel-head"><h2 style="color:var(--red)">⚠ Overdue tasks (${overdue.length})</h2></div><div class="list">${overdue.map(taskCard).join('')}</div></section>` : ''}
+  <div class="grid-2">
+    <section class="card panel"><div class="panel-head"><h2>Meetings</h2><button class="btn sm" data-action="new-meeting">+ Meeting</button></div>
+      ${dayM.length ? `<div class="list">${dayM.map(meetingCard).join('')}</div>` : emptyBox('📅', 'No meetings this day', 'A free day – or a chance to book one. Press <kbd>N</kbd> to add a meeting.')}
+      ${dayF.length ? `<div class="sec-title">Follow-ups due</div><div class="list">${dayF.map(m => `<div class="card item" style="padding:9px 12px"><div class="body"><div class="ttl">↻ ${esc(m.title)}</div><div class="meta"><span>${esc(m.client || 'No client')}</span><span>Meeting on ${fmtDate(m.date, { day: 'numeric', month: 'short' })}</span></div></div><button class="btn sm" data-action="edit-meeting" data-id="${m.id}">Open</button></div>`).join('')}</div>` : ''}
+    </section>
+    <section class="card panel"><div class="panel-head"><h2>Tasks due</h2><button class="btn sm" data-action="new-task">+ Task</button></div>
+      ${dayT.length ? `<div class="list">${dayT.map(taskCard).join('')}</div>` : emptyBox('✅', 'No tasks due this day', 'Use the quick-add bar above or press <kbd>T</kbd> to add one.')}
+    </section>
+  </div>
+  ${weekCard()}`;
+}
+
+function weekCard() {
+  const ws = weekStart(ui.selDate), T = today();
+  const days = [...Array(7)].map((_, i) => addDays(ws, i));
+  const cells = days.map(d => {
+    const ms = meetingsOn(d).filter(isActiveMeeting), ts = DB.tasks.filter(t => t.dueDate === d && t.status !== 'Done');
+    const items = ms.slice(0, 4).map(m => `<span class="wk-m"><b>${m.start}</b> ${esc(m.title)}</span>`).join('') + (ms.length > 4 ? `<span class="muted small">+${ms.length - 4} more</span>` : '');
+    return `<button class="wk-day ${d === T ? 'is-today' : ''} ${d === ui.selDate ? 'sel' : ''}" data-action="pick-day" data-date="${d}">
+      <span class="wk-h"><span>${fmtDate(d, { weekday: 'short' })}</span><span class="wk-n">${parseISO(d).getDate()}</span></span>
+      ${items || '<span class="muted small">—</span>'}${ts.length ? `<span class="wk-t">${ts.length} task${ts.length > 1 ? 's' : ''} due</span>` : ''}</button>`;
+  }).join('');
+  return `<section class="card panel"><div class="panel-head"><h2>Week view</h2>
+    <button class="btn sm" data-action="week-prev" aria-label="Previous week">‹</button>
+    <span class="small muted">${fmtDate(ws, { day: 'numeric', month: 'short' })} – ${fmtDate(addDays(ws, 6), { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+    <button class="btn sm" data-action="week-next" aria-label="Next week">›</button></div>
+    <div class="week">${cells}</div></section>`;
+}
+
+/* ---------- Meetings view ---------- */
+function clientOptions(sel) { return `<option value="">All clients</option>` + allClients().map(c => `<option${c === sel ? ' selected' : ''}>${esc(c)}</option>`).join(''); }
+function viewMeetings() {
+  const f = ui.mf;
+  const rng = [['upcoming', 'Upcoming'], ['today', 'Today'], ['week', 'This week'], ['past', 'Past'], ['all', 'All dates']];
+  return `${notices()}
+  <div class="page-head"><h1>Meetings</h1><button class="btn primary" data-action="new-meeting">+ New meeting</button></div>
+  <section class="card filters"><div class="cols">
+    <div class="field"><label>Search</label><input data-filter="m.q" id="search" value="${esc(f.q)}" placeholder="Title, client, notes…"></div>
+    <div class="field"><label>Period</label><select data-filter="m.range">${rng.map(([v, l]) => `<option value="${v}"${f.range === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label>From</label><input type="date" data-filter="m.from" value="${f.from}"></div>
+    <div class="field"><label>To</label><input type="date" data-filter="m.to" value="${f.to}"></div>
+    <div class="field"><label>Client</label><select data-filter="m.client">${clientOptions(f.client)}</select></div>
+    <div class="field"><label>Status</label><select data-filter="m.status"><option value="">Any status</option>${opt(MEETING_STATUSES, f.status)}</select></div>
+    <div class="field"><label>Type</label><select data-filter="m.type"><option value="">Any type</option>${opt(MEETING_TYPES, f.type)}</select></div>
+  </div><div class="filters-foot"><span class="small muted" id="count"></span><button class="btn sm ghost" data-action="reset-filters">Reset filters</button></div></section>
+  <div id="list"></div>`;
+}
+function meetingsListHTML() {
+  const list = filterMeetings();
+  const cnt = $('#count'); if (cnt) cnt.textContent = `${list.length} of ${DB.meetings.length} meetings`;
+  if (!DB.meetings.length) return emptyBox('📅', 'No meetings yet', 'Add your first meeting to start tracking your day.', '<button class="btn primary" data-action="new-meeting">+ New meeting</button>');
+  if (!list.length) return emptyBox('🔍', 'No meetings match your filters', 'Try a different period or clear the filters.', '<button class="btn" data-action="reset-filters">Reset filters</button>');
+  const T = today(); let html = '', cur = '';
+  list.forEach(m => {
+    if (m.date !== cur) {
+      if (cur) html += '</div>';
+      cur = m.date;
+      html += `<h3 class="day-head ${cur === T ? 'today' : ''}">${fmtDate(cur)} ${cur === T ? '<span class="badge b-blue">Today</span>' : ''}</h3><div class="list">`;
+    }
+    html += meetingCard(m);
+  });
+  return html + '</div>';
+}
+
+/* ---------- Tasks view ---------- */
+function viewTasks() {
+  const f = ui.tf;
+  const rng = [['all', 'All dates'], ['overdue', 'Overdue'], ['today', 'Today'], ['week', 'This week'], ['upcoming', 'Upcoming'], ['past', 'Past']];
+  const sts = [['open', 'Open (To Do + In Progress)'], ['', 'All statuses'], ['To Do', 'To Do'], ['In Progress', 'In Progress'], ['Done', 'Done']];
+  return `${notices()}
+  <div class="page-head"><h1>Tasks</h1><button class="btn primary" data-action="new-task">+ New task</button></div>
+  ${quickBar()}
+  <section class="card filters"><div class="cols">
+    <div class="field"><label>Search</label><input data-filter="t.q" id="search" value="${esc(f.q)}" placeholder="Title, client, notes…"></div>
+    <div class="field"><label>Status</label><select data-filter="t.status">${sts.map(([v, l]) => `<option value="${v}"${f.status === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label>Due</label><select data-filter="t.range">${rng.map(([v, l]) => `<option value="${v}"${f.range === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label>From</label><input type="date" data-filter="t.from" value="${f.from}"></div>
+    <div class="field"><label>To</label><input type="date" data-filter="t.to" value="${f.to}"></div>
+    <div class="field"><label>Client</label><select data-filter="t.client">${clientOptions(f.client)}</select></div>
+    <div class="field"><label>Priority</label><select data-filter="t.priority"><option value="">Any priority</option>${opt(PRIORITIES, f.priority)}</select></div>
+    <div class="field"><label>Category</label><select data-filter="t.category"><option value="">Any category</option>${opt(CATEGORIES, f.category)}</select></div>
+  </div><div class="filters-foot"><span class="small muted" id="count"></span><button class="btn sm ghost" data-action="reset-filters">Reset filters</button></div></section>
+  <div id="list"></div>`;
+}
+function tasksListHTML() {
+  const list = filterTasks();
+  const cnt = $('#count'); if (cnt) cnt.textContent = `${list.length} of ${DB.tasks.length} tasks`;
+  if (!DB.tasks.length) return emptyBox('✅', 'No tasks yet', 'Type a task in the quick-add bar above, or create one with the button.', '<button class="btn primary" data-action="new-task">+ New task</button>');
+  if (!list.length) return emptyBox('🔍', 'No tasks match your filters', 'Nothing here – either you are all caught up, or the filters are too narrow.', '<button class="btn" data-action="reset-filters">Reset filters</button>');
+  return `<div class="list">${list.map(taskCard).join('')}</div>`;
+}
+
+/* ---------- Toast & theme ---------- */
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind === 'warn' ? ' warn' : ''); el.textContent = msg;
+  $('#toast').appendChild(el); setTimeout(() => el.remove(), kind === 'warn' ? 5000 : 2600);
+}
+function applyTheme() {
+  const t = DB.settings.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  document.documentElement.dataset.theme = t;
+  $('#theme-btn').textContent = t === 'dark' ? '☀' : '☾';
+  const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = t === 'dark' ? '#171d28' : '#2f5bea';
+}
+
+/* ===================== 5. FORMS & MODALS ===================== */
+let lastFocus = null;
+function openModal(title, html) {
+  lastFocus = document.activeElement;
+  $('#modal-root').innerHTML = `<div class="overlay" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="modal">
+    <div class="modal-head"><h2>${esc(title)}</h2><button class="icon-btn" data-action="close-modal" aria-label="Close">✕</button></div>
+    <div class="modal-body">${html}</div></div></div>`;
+  document.body.classList.add('noscroll');
+  setTimeout(() => { const f = $('#modal-root input:not([type=hidden]),#modal-root button.btn'); if (f) f.focus(); }, 30);
+}
+function closeModal() {
+  $('#modal-root').innerHTML = ''; document.body.classList.remove('noscroll');
+  if (lastFocus && lastFocus.focus && document.contains(lastFocus)) lastFocus.focus();
+}
+const modalOpen = () => !!$('#modal-root').firstChild;
+
+/* Promise-based confirm dialog; buttons: [{label, value, cls}] – resolves value or null on Esc */
+function confirmBox({ title, message, buttons }) {
+  return new Promise(res => {
+    const root = $('#confirm-root');
+    root.innerHTML = `<div class="overlay top"><div class="modal small" role="alertdialog" aria-label="${esc(title)}">
+      <div class="modal-head"><h2>${esc(title)}</h2></div>
+      <div class="modal-body"><p style="margin-top:0">${esc(message)}</p>
+      <div class="modal-actions">${buttons.map((b, i) => `<button class="btn ${b.cls || ''}" data-ci="${i}">${esc(b.label)}</button>`).join('')}</div></div></div></div>`;
+    const done = v => { root.innerHTML = ''; document.removeEventListener('keydown', onKey, true); res(v); };
+    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); done(null); } };
+    document.addEventListener('keydown', onKey, true);
+    root.onclick = e => { const b = e.target.closest('[data-ci]'); if (b) done(buttons[+b.dataset.ci].value); };
+    const first = root.querySelector('[data-ci]'); if (first) first.focus();
+  });
+}
+const confirmDelete = (what, name) => confirmBox({
+  title: `Delete ${what}?`, message: `"${name}" will be permanently deleted. This can't be undone.`,
+  buttons: [{ label: 'Cancel', value: false }, { label: 'Delete', value: true, cls: 'danger' }]
+});
+
+/* ---- Form helpers ---- */
+const clientDatalist = () => `<datalist id="client-list">${allClients().map(c => `<option value="${esc(c)}">`).join('')}</datalist>`;
+function setErr(form, name, msg) {
+  const e = form.querySelector(`[data-err="${name}"]`); if (e) e.textContent = msg;
+  const i = form.elements[name]; if (i) i.classList.add('invalid');
+}
+function clearErrs(form) {
+  form.querySelectorAll('[data-err]').forEach(e => e.textContent = '');
+  form.querySelectorAll('.invalid').forEach(e => e.classList.remove('invalid'));
+}
+function focusFirstInvalid(form) { const i = form.querySelector('.invalid'); if (i) i.focus(); }
+function defaultStart(date) {
+  if (date !== today()) return '09:00';
+  const h = new Date().getHours() + 1; return h < 8 ? '09:00' : h > 21 ? '09:00' : pad(h) + ':00';
+}
+
+/* ---------- Meeting form ---------- */
+function openMeetingForm(src, id) {
+  const date = (src && src.date) || (ui.view === 'dashboard' ? ui.selDate : today());
+  const start = (src && src.start) || defaultStart(date);
+  const d = Object.assign({ title: '', date, start, end: fromMin(Math.min(toMin(start) + 60, 1439)), client: '', contacts: '', type: 'Video', location: '', notes: '', outcome: '', status: 'Scheduled', followUp: '' }, src || {});
+  const dur = toMin(d.end) - toMin(d.start);
+  openModal(id ? 'Edit meeting' : 'New meeting', `
+  <form data-form="meeting" data-id="${id || ''}" novalidate autocomplete="off">
+    <div class="field"><label for="f-title">Title <i>*</i></label><input id="f-title" name="title" maxlength="200" value="${esc(d.title)}"><div class="err" data-err="title"></div></div>
+    <div class="cols">
+      <div class="field"><label for="f-date">Date <i>*</i></label><input id="f-date" type="date" name="date" value="${esc(d.date)}"><div class="err" data-err="date"></div></div>
+      <div class="field"><label for="f-start">Start (24h) <i>*</i></label><input id="f-start" name="start" data-time inputmode="numeric" maxlength="5" placeholder="HH:MM" value="${esc(d.start)}"><div class="err" data-err="start"></div></div>
+      <div class="field"><label for="f-dur">Duration</label><select id="f-dur" name="dur">${DURATIONS.map(n => `<option value="${n}"${n === dur ? ' selected' : ''}>${n >= 60 && n % 60 === 0 ? n / 60 + ' h' : n + ' min'}</option>`).join('')}<option value="custom"${DURATIONS.includes(dur) ? '' : ' selected'}>Custom</option></select></div>
+      <div class="field"><label for="f-end">End (24h) <i>*</i></label><input id="f-end" name="end" data-time inputmode="numeric" maxlength="5" placeholder="HH:MM" value="${esc(d.end)}"><div class="err" data-err="end"></div></div>
+    </div>
+    <div id="overlap-hint"></div>
+    <div class="cols">
+      <div class="field"><label for="f-client">Client / company</label><input id="f-client" name="client" list="client-list" maxlength="200" value="${esc(d.client)}">${clientDatalist()}</div>
+      <div class="field"><label for="f-contacts">Contact person(s)</label><input id="f-contacts" name="contacts" maxlength="400" value="${esc(d.contacts)}"></div>
+      <div class="field"><label for="f-type">Type</label><select id="f-type" name="type">${opt(MEETING_TYPES, d.type)}</select></div>
+      <div class="field"><label for="f-status">Status</label><select id="f-status" name="status">${opt(MEETING_STATUSES, d.status)}</select></div>
+    </div>
+    <div class="field"><label for="f-loc">Location or meeting link</label><input id="f-loc" name="location" maxlength="500" value="${esc(d.location)}" placeholder="Office address or https://…"></div>
+    <div class="field"><label for="f-notes">Agenda / notes</label><textarea id="f-notes" name="notes">${esc(d.notes)}</textarea></div>
+    <div class="field"><label for="f-out">Outcome / next steps</label><textarea id="f-out" name="outcome">${esc(d.outcome)}</textarea></div>
+    <div class="field" style="max-width:240px"><label for="f-fu">Follow-up date (optional)</label><input id="f-fu" type="date" name="followUp" value="${esc(d.followUp)}"><div class="err" data-err="followUp"></div></div>
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">${id ? 'Save changes' : 'Add meeting'}</button></div>
+  </form>`);
+  wireMeetingForm($('#modal-root form'), id);
+}
+/* Keeps end/duration in sync and shows the live overlap warning */
+function wireMeetingForm(form, id) {
+  const f = form.elements;
+  const syncEnd = () => { // start or duration changed → recompute end
+    const s = normTime(f.start.value); if (!s || f.dur.value === 'custom') return;
+    f.end.value = fromMin(Math.min(toMin(s) + Number(f.dur.value), 1439));
+  };
+  const syncDur = () => { // end typed manually → pick matching duration or "custom"
+    const s = normTime(f.start.value), e = normTime(f.end.value); if (!s || !e) return;
+    const diff = toMin(e) - toMin(s); f.dur.value = DURATIONS.includes(diff) ? String(diff) : 'custom';
+  };
+  const hint = () => {
+    const draft = { id: id || '', date: f.date.value, start: normTime(f.start.value), end: normTime(f.end.value), status: f.status.value };
+    const box = $('#overlap-hint', form);
+    if (!isValidDate(draft.date) || !draft.start || !draft.end || toMin(draft.end) <= toMin(draft.start)) { box.innerHTML = ''; return; }
+    const ov = overlapsOf(draft);
+    box.innerHTML = ov.length ? `<div class="warn" style="margin:0 0 12px">⚠ Overlaps with: ${ov.map(o => esc(`${o.start}–${o.end} ${shorten(o.title, 30)}`)).join(', ')}</div>` : '';
+  };
+  f.start.addEventListener('input', () => { syncEnd(); hint(); });
+  f.dur.addEventListener('change', () => { syncEnd(); hint(); });
+  f.end.addEventListener('input', () => { syncDur(); hint(); });
+  [f.date, f.status].forEach(el => el.addEventListener('change', hint));
+  hint();
+}
+function submitMeeting(form) {
+  const f = form.elements; clearErrs(form);
+  const v = {
+    title: f.title.value.trim(), date: f.date.value, start: normTime(f.start.value), end: normTime(f.end.value),
+    client: f.client.value.trim(), contacts: f.contacts.value.trim(), type: f.type.value, location: f.location.value.trim(),
+    notes: f.notes.value.trim(), outcome: f.outcome.value.trim(), status: f.status.value, followUp: f.followUp.value
+  };
+  let ok = true; const bad = (k, m) => { setErr(form, k, m); ok = false; };
+  if (!v.title) bad('title', 'Please enter a title.');
+  if (!isValidDate(v.date)) bad('date', 'Please enter a valid date.');
+  if (!v.start) bad('start', 'Use 24-hour time, e.g. 09:30.');
+  if (!v.end) bad('end', 'Use 24-hour time, e.g. 10:30.');
+  else if (v.start && toMin(v.end) <= toMin(v.start)) bad('end', 'End must be after the start.');
+  if (v.followUp) {
+    if (!isValidDate(v.followUp)) bad('followUp', 'Please enter a valid date.');
+    else if (isValidDate(v.date) && v.followUp < v.date) bad('followUp', "Follow-up can't be before the meeting.");
+  }
+  if (!ok) { focusFirstInvalid(form); return; }
+  const id = form.dataset.id;
+  saveMeeting(v, id || null);
+  const ov = overlapsOf(Object.assign({ id: id || '' }, v));
+  closeModal(); render();
+  if (ov.length) toast(`Saved – but it overlaps with "${shorten(ov[0].title, 30)}"`, 'warn'); else toast(id ? 'Meeting updated' : 'Meeting added');
+}
+
+/* ---------- Task form ---------- */
+function openTaskForm(src, id) {
+  const d = Object.assign({ title: '', dueDate: ui.view === 'dashboard' ? ui.selDate : today(), dueTime: '', priority: 'Medium', status: 'To Do', category: 'Other', client: '', meetingId: '', notes: '' }, src || {});
+  const meetings = DB.meetings.slice().sort((a, b) => meetingSort(b, a));
+  openModal(id ? 'Edit task' : 'New task', `
+  <form data-form="task" data-id="${id || ''}" novalidate autocomplete="off">
+    <div class="field"><label for="t-title">Title <i>*</i></label><input id="t-title" name="title" maxlength="200" value="${esc(d.title)}"><div class="err" data-err="title"></div></div>
+    <div class="cols">
+      <div class="field"><label for="t-date">Due date <i>*</i></label><input id="t-date" type="date" name="dueDate" value="${esc(d.dueDate)}"><div class="err" data-err="dueDate"></div></div>
+      <div class="field"><label for="t-time">Due time (optional, 24h)</label><input id="t-time" name="dueTime" data-time inputmode="numeric" maxlength="5" placeholder="HH:MM" value="${esc(d.dueTime)}"><div class="err" data-err="dueTime"></div></div>
+      <div class="field"><label for="t-prio">Priority</label><select id="t-prio" name="priority">${opt(PRIORITIES, d.priority)}</select></div>
+      <div class="field"><label for="t-status">Status</label><select id="t-status" name="status">${opt(TASK_STATUSES, d.status)}</select></div>
+      <div class="field"><label for="t-cat">Category</label><select id="t-cat" name="category">${opt(CATEGORIES, d.category)}</select></div>
+      <div class="field"><label for="t-client">Client</label><input id="t-client" name="client" list="client-list" maxlength="200" value="${esc(d.client)}">${clientDatalist()}</div>
+    </div>
+    <div class="field"><label for="t-meet">Related meeting (optional)</label><select id="t-meet" name="meetingId"><option value="">— None —</option>${meetings.map(m => `<option value="${m.id}"${m.id === d.meetingId ? ' selected' : ''}>${esc(fmtDate(m.date, { day: 'numeric', month: 'short' }) + ' ' + m.start + ' · ' + shorten(m.title, 40) + (m.client ? ' (' + m.client + ')' : ''))}</option>`).join('')}</select></div>
+    <div class="field"><label for="t-notes">Notes</label><textarea id="t-notes" name="notes">${esc(d.notes)}</textarea></div>
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">${id ? 'Save changes' : 'Add task'}</button></div>
+  </form>`);
+  const form = $('#modal-root form');
+  form.elements.meetingId.addEventListener('change', () => { // auto-fill client from the linked meeting
+    const m = findMeeting(form.elements.meetingId.value);
+    if (m && m.client && !form.elements.client.value.trim()) form.elements.client.value = m.client;
+  });
+}
+function submitTask(form) {
+  const f = form.elements; clearErrs(form);
+  const rawTime = f.dueTime.value.trim(), time = normTime(rawTime);
+  const v = {
+    title: f.title.value.trim(), dueDate: f.dueDate.value, dueTime: time || '', priority: f.priority.value, status: f.status.value,
+    category: f.category.value, client: f.client.value.trim(), meetingId: f.meetingId.value, notes: f.notes.value.trim()
+  };
+  let ok = true; const bad = (k, m) => { setErr(form, k, m); ok = false; };
+  if (!v.title) bad('title', 'Please enter a title.');
+  if (!isValidDate(v.dueDate)) bad('dueDate', 'Please enter a valid due date.');
+  if (rawTime && !time) bad('dueTime', 'Use 24-hour time, e.g. 14:30.');
+  if (!ok) { focusFirstInvalid(form); return; }
+  if (!v.client && v.meetingId) { const m = findMeeting(v.meetingId); if (m) v.client = m.client; }
+  const id = form.dataset.id;
+  saveTask(v, id || null); closeModal(); render(); toast(id ? 'Task updated' : 'Task added');
+}
+
+/* ---------- Quick-add parser ---------- */
+const WEEKDAYS = { sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2, wed: 3, wednesday: 3, thu: 4, thur: 4, thurs: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6 };
+function parseQuick(input) {
+  let s = ' ' + input + ' '; const T = today();
+  const r = { title: '', priority: 'Medium', category: 'Other', dueDate: '', dueTime: '' };
+  s = s.replace(/\s!(high|h|medium|med|m|low|l)(?=\s)/i, (_, p) => { p = p.toLowerCase()[0]; r.priority = p === 'h' ? 'High' : p === 'l' ? 'Low' : 'Medium'; return ' '; });
+  s = s.replace(/\s#([a-z-]+)(?=\s)/i, (all, c) => {
+    const key = c.toLowerCase().replace(/[^a-z]/g, '');
+    const hit = key && CATEGORIES.find(x => x.toLowerCase().replace(/[^a-z]/g, '').startsWith(key));
+    if (hit) { r.category = hit; return ' '; } return all;
+  });
+  s = s.replace(/\s(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)(?=\s)/i, (_, h, m) => { r.dueTime = pad(+h) + ':' + m; return ' '; });
+  const dateRules = [
+    [/\s(\d{4}-\d{2}-\d{2})(?=\s)/, m => isValidDate(m[1]) ? m[1] : ''],
+    [/\s(\d{1,2})[./](\d{1,2})(?:[./](\d{4}))?(?=\s)/, m => {
+      const y = m[3] || String(new Date().getFullYear()), iso = `${y}-${pad(+m[2])}-${pad(+m[1])}`;
+      if (!isValidDate(iso)) return '';
+      return (!m[3] && iso < T) ? `${+y + 1}-${pad(+m[2])}-${pad(+m[1])}` : iso;
+    }],
+    [/\s(today)(?=\s)/i, () => T],
+    [/\s(tomorrow|tmrw|tmr)(?=\s)/i, () => addDays(T, 1)],
+    [/\sin\s+(\d{1,3})\s+days?(?=\s)/i, m => addDays(T, +m[1])],
+    [/\s(?:next\s+)?(monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat|sunday|sun)(?=\s)/i, m => {
+      let diff = (WEEKDAYS[m[1].toLowerCase()] - parseISO(T).getDay() + 7) % 7; if (diff === 0) diff = 7; return addDays(T, diff);
+    }]
+  ];
+  for (const [re, fn] of dateRules) {
+    const m = re.exec(s); if (!m) continue;
+    const d = fn(m); if (d) { r.dueDate = d; s = s.replace(re, ' '); break; }
+  }
+  r.title = s.replace(/\s+/g, ' ').trim();
+  if (!r.dueDate) r.dueDate = T;
+  return r;
+}
+
+/* ===================== 6. IMPORT / EXPORT ===================== */
+function download(name, text, mime) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function exportJSON() {
+  download(`zarghamflow-backup-${today()}.json`, JSON.stringify({ app: 'zarghamflow', version: 1, exportedAt: new Date().toISOString(), meetings: DB.meetings, tasks: DB.tasks }, null, 2), 'application/json');
+  DB.settings.lastBackup = new Date().toISOString(); save(); render(); toast('Backup downloaded');
+}
+function csvCell(v) {
+  let s = String(v == null ? '' : v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // neutralise spreadsheet formula injection
+  return '"' + s.replace(/"/g, '""') + '"';
+}
+function exportCSV(kind) {
+  let head, rows;
+  if (kind === 'meetings') {
+    head = ['Title', 'Date', 'Start', 'End', 'Client', 'Contacts', 'Type', 'Location', 'Notes', 'Outcome', 'Status', 'Follow-up'];
+    rows = DB.meetings.slice().sort(meetingSort).map(m => [m.title, m.date, m.start, m.end, m.client, m.contacts, m.type, m.location, m.notes, m.outcome, m.status, m.followUp]);
+  } else {
+    head = ['Title', 'Due date', 'Due time', 'Priority', 'Status', 'Category', 'Client', 'Related meeting', 'Notes', 'Completed at'];
+    rows = DB.tasks.slice().sort(taskSort).map(t => { const lm = findMeeting(t.meetingId); return [t.title, t.dueDate, t.dueTime, t.priority, t.status, t.category, t.client, lm ? lm.title : '', t.notes, t.completedAt]; });
+  }
+  const csv = '\uFEFF' + [head, ...rows].map(r => r.map(csvCell).join(',')).join('\r\n');
+  download(`zarghamflow-${kind}-${today()}.csv`, csv, 'text/csv;charset=utf-8');
+}
+async function importFile(file) {
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); } catch (e) { toast('That file is not valid JSON.', 'warn'); return; }
+  if (!data || typeof data !== 'object' || (!Array.isArray(data.meetings) && !Array.isArray(data.tasks))) { toast("This doesn't look like a ZarghamFlow backup.", 'warn'); return; }
+  const nm = (data.meetings || []).length, nt = (data.tasks || []).length;
+  const choice = await confirmBox({
+    title: 'Import backup', message: `The file contains ${nm} meetings and ${nt} tasks. Merge adds/updates items and keeps what you have. Replace wipes the current data first.`,
+    buttons: [{ label: 'Cancel', value: null }, { label: 'Merge', value: 'merge' }, { label: 'Replace all', value: 'replace', cls: 'danger' }]
+  });
+  if (!choice) return;
+  const res = ingest(data, choice === 'merge'); save(); closeModal(); render();
+  toast(`Imported ${res.meetings} meetings and ${res.tasks} tasks`);
+}
+function openDataModal() {
+  const lb = DB.settings.lastBackup;
+  openModal('Data & backup', `
+    <p style="margin-top:0">You have <b>${DB.meetings.length}</b> meetings and <b>${DB.tasks.length}</b> tasks. ${notifyReady() ? 'Changes sync to your Google Sheets database.' : 'Records are currently stored in this browser.'}</p>
+    ${DB.settings.notify.databaseUrl ? `<p class="small"><a href="${esc(DB.settings.notify.databaseUrl)}" target="_blank" rel="noopener noreferrer">Open Google Sheets database</a></p>` : ''}
+    <p class="small muted">Last backup: ${lb ? new Date(lb).toLocaleString('en-GB', { hour12: false }) : 'never'} · Timezone: ${esc(Intl.DateTimeFormat().resolvedOptions().timeZone)}</p>
+    <div class="data-grid">
+      <button class="btn primary" data-action="export-json">⬇ Export backup (JSON)</button>
+      <button class="btn" data-action="import">⬆ Import backup (JSON)</button>
+      <button class="btn" data-action="csv-meetings">Meetings → CSV</button>
+      <button class="btn" data-action="csv-tasks">Tasks → CSV</button>
+      <button class="btn" data-action="ics-all">Upcoming meetings → .ics</button>
+      <button class="btn" data-action="open-notify">🔔 Email &amp; Calendar setup</button>
+    </div>
+    <div class="modal-actions" style="justify-content:space-between"><button class="btn sm ghost" data-action="clear-all" style="color:var(--red)">Delete all data…</button><button class="btn" data-action="close-modal">Close</button></div>`);
+}
+
+/* ===================== 6b. EMAIL REMINDERS & GOOGLE CALENDAR =====================
+   How it works: a small Google Apps Script (copied from this app, running inside YOUR Google account)
+   receives a sync of your upcoming tasks and meetings. It creates/updates Google Calendar events and
+   emails reminders on a 5-minute timer – so reminders arrive even when this page is closed.
+   Without the script you still get "Add to Google Calendar" links and .ics files. */
+const tzName = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+const hashStr = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
+function randToken() { const a = new Uint8Array(24); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, '0')).join(''); }
+const urlOk = u => /^https:\/\/script\.google\.com\/.+\/exec$/.test(u);
+const notifyReady = () => { const n = DB.settings.notify; return urlOk(n.scriptUrl) && !!n.token; };
+const explainErr = e => (e instanceof TypeError)
+  ? "Couldn't reach the script. Check that the URL ends in /exec, that access is set to “Anyone” in the deployment, and that you are online."
+  : (e && e.message) || String(e);
+
+/* ---- What gets sent to your script: upcoming meetings + open tasks ---- */
+function buildPayload() {
+  const n = DB.settings.notify, from = addDays(today(), -1);
+  const meetings = DB.meetings.filter(m => m.date >= from || (m.followUp && m.followUp >= from)).map(m => ({
+    id: m.id, title: m.title, date: m.date, start: m.start, end: m.end, client: m.client, contacts: m.contacts, type: m.type,
+    location: m.location, notes: m.notes, status: m.status, followUp: m.followUp, cal: n.calendarTypes.includes(m.type)
+  }));
+  const tasks = DB.tasks.filter(t => t.status !== 'Done').map(t => ({
+    id: t.id, title: t.title, dueDate: t.dueDate, dueTime: t.dueTime, priority: t.priority, category: t.category, client: t.client
+  }));
+  return {
+    action: 'sync', tz: tzName(), email: n.email,
+    records: { meetings: DB.meetings, tasks: DB.tasks },
+    prefs: { emailOn: n.emailOn, taskLeadHours: n.taskLeadHours, meetingLeadMinutes: n.meetingLeadMinutes, overdueOn: n.overdueOn, followUpOn: n.followUpOn, calendarOn: n.calendarOn },
+    allMeetingIds: DB.meetings.map(m => m.id), meetings, tasks
+  };
+}
+
+/* POST as text/plain (no CORS pre-flight). If the reply can't be read, resend "blind" – syncs are idempotent. */
+async function callScript(payload, retryBlind) {
+  const n = DB.settings.notify;
+  const opts = { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ token: n.token }, payload)) };
+  let r;
+  try { r = await fetch(n.scriptUrl, opts); }
+  catch (e) {
+    if (!retryBlind) throw e;
+    await fetch(n.scriptUrl, Object.assign({ mode: 'no-cors' }, opts));
+    return { ok: true, unconfirmed: true };
+  }
+  try { return await r.json(); }
+  catch (e) { throw new Error('The script did not answer correctly. Make sure it is deployed as a Web app with access set to “Anyone”.'); }
+}
+
+let syncTimer = null, syncing = false;
+function updateBadge(state) {
+  const el = $('#sync-state'); if (!el) return;
+  const n = DB.settings.notify;
+  if (!notifyReady()) { el.textContent = ''; el.title = ''; return; }
+  const bad = (n.lastStatus || '').startsWith('error');
+  el.textContent = state === 'busy' ? '…' : bad ? '⚠' : '✓';
+  el.title = bad ? 'Last sync failed' : 'Synced with Google';
+}
+function scheduleSync() {
+  if (!notifyReady()) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(true), 2500);
+}
+async function syncNow(silent) {
+  const n = DB.settings.notify;
+  if (!notifyReady()) { if (!silent) toast('Set up the Google connection first (🔔 button).', 'warn'); return false; }
+  if (syncing) { scheduleSync(); return false; }
+  const payload = buildPayload(), sig = hashStr(JSON.stringify(payload));
+  if (silent && sig === n.lastSig && n.lastStatus === 'ok') return true;
+  syncing = true; updateBadge('busy');
+  try {
+    const r = await callScript(payload, true);
+    if (r.ok === false) throw new Error(r.error || 'Script error');
+    n.lastSig = sig; n.lastSync = new Date().toISOString(); n.lastStatus = 'ok';
+    if (r.databaseUrl) n.databaseUrl = r.databaseUrl;
+    persist();
+    if (!silent) {
+      const c = r.calendar;
+      toast(c ? `Synced · calendar: ${c.created} added, ${c.updated} updated, ${c.deleted} removed` : 'Synced with Google Sheets');
+    }
+    return true;
+  } catch (e) {
+    n.lastStatus = 'error: ' + explainErr(e); persist();
+    if (!silent) toast(explainErr(e), 'warn');
+    return false;
+  } finally { syncing = false; updateBadge(); }
+}
+
+async function restoreCloud() {
+  if (!notifyReady()) return;
+  try {
+    const result = await callScript({ action: 'load' }, false);
+    if (!result || result.ok === false) throw new Error((result && result.error) || 'Could not load database');
+    const n = DB.settings.notify;
+    n.databaseUrl = str(result.databaseUrl, 500);
+    if (result.initialized) {
+      ingest({ meetings: result.meetings, tasks: result.tasks }, false);
+      persist(); render();
+      n.lastSig = hashStr(JSON.stringify(buildPayload()));
+      n.lastSync = new Date().toISOString(); n.lastStatus = 'ok'; persist(); updateBadge();
+    } else {
+      n.lastSig = ''; persist();
+      await syncNow(true);
+    }
+  } catch (e) {
+    const n = DB.settings.notify;
+    n.lastStatus = 'error: ' + explainErr(e); persist(); updateBadge();
+    console.error('Database restore failed', e);
+  }
+}
+
+/* ---- "Add to Google Calendar" link and .ics files (work without any setup) ---- */
+const calStamp = (d, t) => d.replace(/-/g, '') + 'T' + t.replace(':', '') + '00';
+function gcalURL(m) {
+  const p = new URLSearchParams({
+    action: 'TEMPLATE', text: m.title, dates: calStamp(m.date, m.start) + '/' + calStamp(m.date, m.end), ctz: tzName(),
+    details: [m.type + (m.client ? ' · ' + m.client : ''), m.contacts ? 'With: ' + m.contacts : '', m.notes].filter(Boolean).join('\n'),
+    location: m.location || ''
+  });
+  return 'https://calendar.google.com/calendar/render?' + p.toString();
+}
+const icsEsc = s => String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+const icsFold = line => line.replace(/(.{74})(?=.)/g, '$1\r\n ');
+function buildICS(list) {
+  const lead = DB.settings.notify.meetingLeadMinutes, stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+  const L = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ZarghamFlow//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+  list.forEach(m => {
+    L.push('BEGIN:VEVENT', `UID:${m.id}@bd-planner`, `DTSTAMP:${stamp}`, `DTSTART:${calStamp(m.date, m.start)}`, `DTEND:${calStamp(m.date, m.end)}`,
+      `SUMMARY:${icsEsc(m.title)}`);
+    if (m.location) L.push(`LOCATION:${icsEsc(m.location)}`);
+    const desc = [m.type + (m.client ? ' · ' + m.client : ''), m.contacts ? 'With: ' + m.contacts : '', m.notes].filter(Boolean).join('\n');
+    L.push(`DESCRIPTION:${icsEsc(desc)}`, 'BEGIN:VALARM', `TRIGGER:-PT${lead}M`, 'ACTION:DISPLAY', 'DESCRIPTION:Reminder', 'END:VALARM', 'END:VEVENT');
+  });
+  L.push('END:VCALENDAR');
+  return L.map(icsFold).join('\r\n') + '\r\n';
+}
+function exportICS(list, name) {
+  if (!list.length) { toast('No upcoming meetings to export.', 'warn'); return; }
+  download(name, buildICS(list), 'text/calendar;charset=utf-8');
+}
+
+/* ---- Settings dialog ---- */
+function gasScript() { return $('#gas-template').textContent.replace('__TOKEN__', DB.settings.notify.token).trim() + '\n'; }
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall back below */ }
+  try {
+    const ta = Object.assign(document.createElement('textarea'), { value: text });
+    ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand('copy'); ta.remove(); return ok;
+  } catch (e) { return false; }
+}
+function notifyStatusHTML() {
+  const n = DB.settings.notify;
+  if (!notifyReady()) return '<div class="status-line">Not connected yet – follow the setup steps below (about 3 minutes, once).</div>';
+  if ((n.lastStatus || '').startsWith('error')) return `<div class="status-line bad">⚠ Last sync failed: ${esc(n.lastStatus.slice(7))}</div>`;
+  const t = n.lastSync ? new Date(n.lastSync).toLocaleString('en-GB', { hour12: false }) : 'not synced yet';
+  return `<div class="status-line ok">✓ Connected · last sync: ${esc(t)}${n.databaseUrl ? ` · <a href="${esc(n.databaseUrl)}" target="_blank" rel="noopener noreferrer">Open database</a>` : ''}</div>`;
+}
+function openNotifyModal() {
+  const n = DB.settings.notify;
+  if (!n.token) { n.token = randToken(); persist(); }
+  const opts = (list, cur, label) => list.map(v => `<option value="${v}"${v === cur ? ' selected' : ''}>${label(v)}</option>`).join('');
+  const hrs = v => v < 24 ? `${v} hour${v > 1 ? 's' : ''}` : `${v / 24} day${v > 24 ? 's' : ''}`;
+  const mins = v => v < 60 ? `${v} minutes` : v === 60 ? '1 hour' : v < 1440 ? `${v / 60} hours` : '1 day';
+  openModal('Email reminders & Google Calendar', `
+  <form data-form="notify" novalidate autocomplete="off">
+    <div id="notify-status">${notifyStatusHTML()}</div>
+    <details class="help"${notifyReady() ? '' : ' open'}><summary>One-time setup (4 steps)</summary>
+      <ol>
+        <li>Click <b>Copy setup script</b> below.</li>
+        <li>Open <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener noreferrer">script.google.com</a> (signed in with your Gmail) → <b>New project</b>. Delete the sample code, paste the script, press <b>Save</b>.</li>
+        <li>Click <b>Deploy → New deployment</b> → gear icon → <b>Web app</b>. Set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>. When Google asks for permission, choose your account → <i>Advanced</i> → <i>Go to project</i> → <i>Allow</i> (it is your own script).</li>
+        <li>Copy the <b>Web app URL</b> (ends in <code>/exec</code>), paste it below and press <b>Test connection</b>.</li>
+      </ol>
+      <p class="small muted" style="margin:6px 0 0">The script creates a private spreadsheet in your Google account, stores all meetings and tasks there, and restores them when you open the app. It also handles Calendar sync and scheduled reminders. Keep the script URL and token private; anyone with both can read or change stored data.</p>
+    </details>
+    <div class="cols">
+      <div class="field"><label for="n-email">Your Gmail address (reminders go here)</label><input id="n-email" type="email" name="email" maxlength="200" value="${esc(n.email)}" placeholder="you@gmail.com"><div class="err" data-err="email"></div></div>
+      <div class="field"><label for="n-url">Web app URL from step 4</label><input id="n-url" name="scriptUrl" maxlength="400" value="${esc(n.scriptUrl)}" placeholder="https://script.google.com/macros/s/…/exec"><div class="err" data-err="scriptUrl"></div></div>
+    </div>
+    <div class="field"><label for="n-token">Private token (already inside the copied script)</label>
+      <div style="display:flex;gap:8px"><input id="n-token" name="token" value="${esc(n.token)}" readonly><button type="button" class="btn sm" data-action="regen-token">New token</button></div></div>
+
+    <div class="sec-title">Email reminders</div>
+    <div class="field"><label class="chk"><input type="checkbox" name="emailOn"${n.emailOn ? ' checked' : ''}> Send me reminder emails</label></div>
+    <div class="cols">
+      <div class="field"><label for="n-tl">Tasks: remind me before the deadline</label><select id="n-tl" name="taskLeadHours">${opts([1, 3, 6, 12, 24, 48], n.taskLeadHours, hrs)}</select></div>
+      <div class="field"><label for="n-ml">Meetings: remind me before the start</label><select id="n-ml" name="meetingLeadMinutes">${opts([15, 30, 60, 120, 1440], n.meetingLeadMinutes, mins)}</select></div>
+    </div>
+    <div class="field"><label class="chk"><input type="checkbox" name="overdueOn"${n.overdueOn ? ' checked' : ''}> Also email me when a task becomes overdue</label>
+      <label class="chk"><input type="checkbox" name="followUpOn"${n.followUpOn ? ' checked' : ''}> Email me on the morning of a meeting's follow-up date</label></div>
+
+    <div class="sec-title">Google Calendar</div>
+    <div class="field"><label class="chk"><input type="checkbox" name="calendarOn"${n.calendarOn ? ' checked' : ''}> Automatically add meetings to my Google Calendar (updates and deletions follow)</label>
+      <div class="chips">${MEETING_TYPES.map(t => `<label class="chk"><input type="checkbox" name="ctype" value="${t}"${n.calendarTypes.includes(t) ? ' checked' : ''}> ${t}</label>`).join('')}</div>
+      <span class="small muted">Only the meeting types ticked above are added. Calendar pop-up reminders use the meeting lead time.</span></div>
+
+    <details class="help"><summary>Show setup script</summary><textarea id="gas-view" readonly rows="7" style="font-family:ui-monospace,Consolas,monospace;font-size:12px"></textarea></details>
+    <div class="modal-actions" style="justify-content:flex-start">
+      <button type="button" class="btn" data-action="copy-script">Copy setup script</button>
+      <button type="button" class="btn" data-action="test-notify">Test connection</button>
+      <button type="button" class="btn" data-action="sync-now">Sync now</button>
+    </div>
+    <div class="modal-actions"><button type="button" class="btn" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save settings</button></div>
+  </form>`);
+  $('#gas-view').value = gasScript();
+}
+/* Reads the dialog into settings; returns false (and shows errors) if invalid */
+function applyNotifyForm(form, needUrl) {
+  clearErrs(form);
+  const f = form.elements, n = DB.settings.notify;
+  const email = f.email.value.trim(), url = f.scriptUrl.value.trim();
+  let ok = true; const bad = (k, m) => { setErr(form, k, m); ok = false; };
+  if (email && !EMAIL_RE.test(email)) bad('email', 'Please enter a valid email address.');
+  if (url && !urlOk(url)) bad('scriptUrl', 'This must be the Web app URL: it starts with https://script.google.com/ and ends in /exec.');
+  if (needUrl && !url) bad('scriptUrl', 'Paste the Web app URL from step 4 first.');
+  if (!ok) { focusFirstInvalid(form); return false; }
+  Object.assign(n, {
+    email, scriptUrl: url, emailOn: f.emailOn.checked, taskLeadHours: Number(f.taskLeadHours.value),
+    meetingLeadMinutes: Number(f.meetingLeadMinutes.value), overdueOn: f.overdueOn.checked, followUpOn: f.followUpOn.checked,
+    calendarOn: f.calendarOn.checked, calendarTypes: [...form.querySelectorAll('input[name=ctype]:checked')].map(x => x.value), lastSig: ''
+  });
+  persist(); updateBadge();
+  return true;
+}
+const notifyForm = () => $('#modal-root form[data-form=notify]');
+const setNotifyBox = html => { const b = $('#notify-status'); if (b) b.innerHTML = html; };
+
+async function notifyTest() {
+  const form = notifyForm(); if (!form || !applyNotifyForm(form, true)) return;
+  const n = DB.settings.notify;
+  setNotifyBox('<div class="status-line">Testing connection…</div>');
+  try {
+    const r = await callScript({ action: 'test', email: n.email, tz: tzName() }, false);
+    if (!r || r.ok === false) throw new Error((r && r.error) || 'Script error');
+    const synced = await syncNow(true);
+    if (!synced) throw new Error((n.lastStatus || '').replace(/^error:\s*/, '') || 'Could not sync the database.');
+    setNotifyBox(`<div class="status-line ok">✓ Connected to ${esc(r.user || 'your Google account')}. ${r.emailSent ? `A test email was sent to ${esc(n.email)} – check your inbox (and spam).` : 'Add your email address above to receive reminders.'} Your Sheets database is ready and Calendar sync is active.</div>`);
+  } catch (e) { setNotifyBox(`<div class="status-line bad">⚠ ${esc(explainErr(e))}</div>`); }
+}
+async function notifySyncNow() {
+  const form = notifyForm(); if (!form || !applyNotifyForm(form, true)) return;
+  setNotifyBox('<div class="status-line">Syncing…</div>');
+  await syncNow(false); setNotifyBox(notifyStatusHTML());
+}
+
+/* ===================== 7. EVENT HANDLING ===================== */
+async function handleAction(el) {
+  const a = el.dataset.action, id = el.dataset.id;
+  switch (a) {
+    case 'nav': ui.view = el.dataset.view; render(); window.scrollTo(0, 0); break;
+    case 'toggle-theme': DB.settings.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; save(); applyTheme(); break;
+    case 'close-modal': closeModal(); break;
+    case 'open-data': openDataModal(); break;
+    case 'new-meeting': openMeetingForm(); break;
+    case 'new-task': openTaskForm(); break;
+    case 'edit-meeting': { const m = findMeeting(id); if (m) openMeetingForm(m, id); break; }
+    case 'dup-meeting': { // opens a pre-filled "new" form so you can pick the new date/time
+      const m = findMeeting(id); if (!m) break;
+      openMeetingForm(Object.assign({}, m, { title: m.title + ' (copy)', status: 'Scheduled', outcome: '' }), null); break;
+    }
+    case 'complete-meeting': { const m = findMeeting(id); if (m) { m.status = 'Completed'; save(); render(); toast('Meeting marked completed'); } break; }
+    case 'del-meeting': { const m = findMeeting(id); if (m && await confirmDelete('meeting', m.title)) { deleteMeeting(id); render(); toast('Meeting deleted'); } break; }
+    case 'meeting-task': {
+      const m = findMeeting(id); if (!m) break;
+      openTaskForm({ title: 'Follow up: ' + m.title, meetingId: m.id, client: m.client, dueDate: m.followUp || addDays(m.date, 1) }); break;
+    }
+    case 'edit-task': { const t = DB.tasks.find(x => x.id === id); if (t) openTaskForm(t, id); break; }
+    case 'del-task': { const t = DB.tasks.find(x => x.id === id); if (t && await confirmDelete('task', t.title)) { deleteTask(id); render(); toast('Task deleted'); } break; }
+    case 'toggle-task': { const t = DB.tasks.find(x => x.id === id); if (t) { setTaskStatus(t, el.checked ? 'Done' : 'To Do'); save(); render(); } break; }
+    case 'cycle-task': { const t = DB.tasks.find(x => x.id === id); if (t) { setTaskStatus(t, TASK_STATUSES[(TASK_STATUSES.indexOf(t.status) + 1) % 3]); save(); render(); } break; }
+    case 'day-prev': ui.selDate = addDays(ui.selDate, -1); render(); break;
+    case 'day-next': ui.selDate = addDays(ui.selDate, 1); render(); break;
+    case 'day-today': ui.selDate = today(); render(); break;
+    case 'week-prev': ui.selDate = addDays(ui.selDate, -7); render(); break;
+    case 'week-next': ui.selDate = addDays(ui.selDate, 7); render(); break;
+    case 'pick-day': ui.selDate = el.dataset.date; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); break;
+    case 'goto-meetings-week': ui.mf = Object.assign(defaultMF(), { range: 'week' }); ui.view = 'meetings'; render(); break;
+    case 'goto-open': ui.tf = defaultTF(); ui.view = 'tasks'; render(); break;
+    case 'goto-overdue': ui.tf = Object.assign(defaultTF(), { range: 'overdue' }); ui.view = 'tasks'; render(); break;
+    case 'goto-done': ui.tf = Object.assign(defaultTF(), { status: 'Done', range: 'week' }); ui.view = 'tasks'; render(); break;
+    case 'reset-filters': if (ui.view === 'meetings') ui.mf = defaultMF(); else ui.tf = defaultTF(); render(); break;
+    case 'export-json': exportJSON(); if (modalOpen()) openDataModal(); break;
+    case 'csv-meetings': exportCSV('meetings'); break;
+    case 'csv-tasks': exportCSV('tasks'); break;
+    case 'import': $('#import-file').click(); break;
+    case 'open-notify': openNotifyModal(); break;
+    case 'copy-script': {
+      const ok = await copyText(gasScript()), v = $('#gas-view');
+      if (v) { v.value = gasScript(); v.closest('details').open = true; }
+      toast(ok ? 'Setup script copied – paste it into script.google.com' : 'Could not copy automatically – select the script below and copy it', ok ? undefined : 'warn'); break;
+    }
+    case 'test-notify': notifyTest(); break;
+    case 'sync-now': notifySyncNow(); break;
+    case 'regen-token': {
+      const form = notifyForm(); if (form) applyNotifyForm(form, false);
+      const yes = await confirmBox({ title: 'Create a new token?', message: 'You will need to copy the setup script again and replace it in script.google.com (then deploy a new version). Syncing pauses until then.', buttons: [{ label: 'Cancel', value: false }, { label: 'New token', value: true, cls: 'danger' }] });
+      if (yes) { const n = DB.settings.notify; n.token = randToken(); n.lastSig = ''; n.lastStatus = ''; persist(); openNotifyModal(); } break;
+    }
+    case 'ics-meeting': { const m = findMeeting(id); if (m) exportICS([m], `meeting-${m.date}.ics`); break; }
+    case 'ics-all': exportICS(DB.meetings.filter(m => isActiveMeeting(m) && m.date >= today()).sort(meetingSort), `zarghamflow-meetings-${today()}.ics`); break;
+    case 'clear-all': {
+      const ok = await confirmBox({ title: 'Delete ALL data?', message: 'Every meeting and task will be erased from this browser. Export a backup first if you might need it.', buttons: [{ label: 'Cancel', value: false }, { label: 'Delete everything', value: true, cls: 'danger' }] });
+      if (ok) { DB.meetings = []; DB.tasks = []; save(); closeModal(); render(); toast('All data deleted'); } break;
+    }
+  }
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-action]');
+  if (!el || el.tagName === 'INPUT') return;     // checkboxes are handled on "change"
+  handleAction(el);
+});
+
+document.addEventListener('submit', e => {
+  const form = e.target.closest('[data-form]'); if (!form) return;
+  e.preventDefault();
+  const kind = form.dataset.form;
+  if (kind === 'meeting') submitMeeting(form);
+  else if (kind === 'task') submitTask(form);
+  else if (kind === 'notify') {
+    if (!applyNotifyForm(form, false)) return;
+    closeModal(); toast('Settings saved'); scheduleSync();
+  }
+  else if (kind === 'quick') {
+    const input = $('#quick-input'), text = input.value.trim();
+    if (!text) { input.focus(); return; }
+    const r = parseQuick(text);
+    if (!r.title) { toast('Please type a task title as well.', 'warn'); return; }
+    saveTask(Object.assign(r, { client: '', meetingId: '', notes: '', status: 'To Do' }), null);
+    render(); toast(`Task added for ${fmtDate(r.dueDate, { weekday: 'short', day: 'numeric', month: 'short' })}${r.dueTime ? ' ' + r.dueTime : ''}`);
+    const again = $('#quick-input'); if (again) again.focus();
+  }
+});
+
+/* Filters (live) + date jump + checkbox toggles */
+function onFilterEvent(e) {
+  const el = e.target;
+  if (el.dataset.filter) {
+    const [k, field] = el.dataset.filter.split('.');
+    (k === 'm' ? ui.mf : ui.tf)[field] = el.value; renderList();
+  } else if (el.dataset.role === 'jump' && e.type === 'change' && isValidDate(el.value)) {
+    ui.selDate = el.value; render();
+  } else if (el.dataset.action === 'toggle-task' && e.type === 'change') handleAction(el);
+}
+document.addEventListener('input', onFilterEvent);
+document.addEventListener('change', onFilterEvent);
+
+/* Tidy 24h time inputs when leaving the field ("930" → "09:30") */
+document.addEventListener('focusout', e => {
+  const el = e.target;
+  if (el.matches && el.matches('input[data-time]')) { const n = normTime(el.value); if (n) el.value = n; }
+});
+
+$('#import-file').addEventListener('change', e => { importFile(e.target.files[0]); e.target.value = ''; });
+
+/* Keyboard shortcuts: N = new meeting, T = new task, / = search, Esc = close */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && modalOpen()) { closeModal(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey || modalOpen() || $('#confirm-root').firstChild) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+  const k = e.key.toLowerCase();
+  if (k === 'n') { e.preventDefault(); openMeetingForm(); }
+  else if (k === 't') { e.preventDefault(); openTaskForm(); }
+  else if (k === '/') { const s = $('#search') || $('#quick-input'); if (s) { e.preventDefault(); s.focus(); } }
+});
+
+/* ===================== 8. INIT ===================== */
+load();
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (!DB.settings.theme) applyTheme(); });
+render();
+setTimeout(restoreCloud, 1500);
+window.addEventListener('online', scheduleSync);
+/* Refresh every minute so "overdue" and "today" stay accurate – but never while you're typing or in a dialog */
+let lastDay = today();
+setInterval(() => {
+  const ae = document.activeElement, typing = ae && /^(input|textarea|select)$/i.test(ae.tagName);
+  if (modalOpen() || typing) return;
+  if (today() !== lastDay) { if (ui.selDate === lastDay) ui.selDate = today(); lastDay = today(); }
+  render();
+}, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+{
+  "name": "zarghamflow",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/shared",
+    "apps/server",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run build --workspace @zarghamflow/shared && concurrently -k -n api,web \"npm:dev --workspace @zarghamflow/server\" \"npm:dev --workspace @zarghamflow/web\"",
+    "build": "npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server && npm run build --workspace @zarghamflow/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint apps packages --max-warnings=0",
+    "test": "npm run test --workspaces --if-present",
+    "audit": "npm audit --omit=dev",
+    "db:migrate": "npm run db:migrate --workspace @zarghamflow/server",
+    "db:seed": "npm run db:seed --workspace @zarghamflow/server"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@types/node": "^22.15.30",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.28.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.34.1"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

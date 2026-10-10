@@ -1,0 +1,112 @@
+openapi: 3.1.0
+info:
+  title: ZarghamFlow API
+  version: 1.0.0
+  description: Single-owner meeting and task planner API. Mutations require the zf_csrf cookie and X-CSRF-Token header.
+servers:
+  - url: /api/v1
+paths:
+  /auth/csrf:
+    get:
+      summary: Create a CSRF token
+      responses: {'200': {description: CSRF token}}
+  /auth/request:
+    post:
+      summary: Request owner magic link (generic response for every address)
+      responses: {'200': {description: Generic sign-in response}}
+  /auth/verify:
+    post:
+      summary: Consume a single-use sign-in token and rotate the session
+      responses: {'200': {description: Signed in}, '400': {description: Invalid or expired token}}
+  /auth/me:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: Current owner}}
+  /meetings:
+    get:
+      security: [{cookieAuth: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, maximum: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0}}
+        - {name: from, in: query, schema: {type: string, format: date}}
+        - {name: to, in: query, schema: {type: string, format: date}}
+        - {name: client, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string}}
+        - {name: q, in: query, schema: {type: string}}
+      responses: {'200': {description: Paged meetings}}
+    post:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'201': {description: Created meeting}, '400': {description: Validation error}}
+  /meetings/{id}:
+    patch:
+      security: [{cookieAuth: []}, {csrf: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Updated meeting}, '409': {description: Version conflict}}
+    delete:
+      security: [{cookieAuth: []}, {csrf: []}]
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'204': {description: Soft deleted}}
+  /meetings/{id}/duplicate:
+    post:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'201': {description: Duplicated meeting}}
+  /tasks:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: Paged tasks}}
+    post:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'201': {description: Created task}}
+  /tasks/{id}:
+    patch:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'200': {description: Updated task}, '409': {description: Version conflict}}
+    delete:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'204': {description: Soft deleted}}
+  /tasks/quick-add:
+    post:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'201': {description: Parsed task}}
+  /dashboard:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: Counters, today view, overdue and weekly items}}
+  /reminder-preferences:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: Reminder preferences}}
+    put:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'200': {description: Saved preferences}}
+  /reminders:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: Reminder delivery log}}
+  /push/subscribe:
+    post:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'201': {description: Push subscription stored}}
+    delete:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'204': {description: Subscription removed}}
+  /import:
+    post:
+      security: [{cookieAuth: []}, {csrf: []}]
+      responses: {'200': {description: Legacy backup imported}}
+  /export.json:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: JSON backup}}
+  /export.csv:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: CSV export}}
+  /export.ics:
+    get:
+      security: [{cookieAuth: []}]
+      responses: {'200': {description: iCalendar export}}
+components:
+  securitySchemes:
+    cookieAuth: {type: apiKey, in: cookie, name: zf_session}
+    csrf: {type: apiKey, in: header, name: X-CSRF-Token}

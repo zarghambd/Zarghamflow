@@ -1,0 +1,69 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_PATH: /data/zarghamflow.sqlite
+      APP_URL: https://${PUBLIC_DOMAIN:-localhost}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      TRUST_PROXY: "true"
+    volumes:
+      - zarghamflow-data:/data
+      - zarghamflow-backups:/app/apps/server/backups
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+
+  mailpit:
+    image: axllent/mailpit:v1.27
+    restart: unless-stopped
+    profiles: ["local-mail"]
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+
+  backup:
+    build: .
+    restart: unless-stopped
+    profiles: ["backup"]
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/zarghamflow.sqlite
+    volumes:
+      - zarghamflow-data:/data:ro
+      - zarghamflow-backups:/app/apps/server/backups
+    entrypoint: ["sh", "-c", "while true; do node dist/backup.js; sleep 86400; done"]
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  zarghamflow-data:
+  zarghamflow-backups:
+  caddy-data:
+  caddy-config:

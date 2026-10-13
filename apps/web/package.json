@@ -1,8 +1,29 @@
 {
   "name": "@zarghamflow/web",
   "private": true,
-  "type": "module",
-  "scripts": { "dev": "vite --host 127.0.0.1", "build": "vite build", "typecheck": "tsc --noEmit -p tsconfig.json" },
-  "dependencies": { "@zarghamflow/shared": "*", "idb": "^8.0.3", "luxon": "^3.6.1" },
-  "devDependencies": { "vite": "^6.3.5", "typescript": "^5.8.3" }
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1 --port 3001",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1 --port 3001",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@zarghamflow/shared": "*",
+    "better-sqlite3": "^12.2.0",
+    "dotenv": "^16.5.0",
+    "idb": "^8.0.3",
+    "luxon": "^3.6.1",
+    "next": "14.2.15",
+    "nodemailer": "^10.0.16",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.30",
+    "@types/nodemailer": "^8.0.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.8.3"
+  }
 }

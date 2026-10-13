@@ -1,13 +1,13 @@
 {
   "id": "/",
-  "name": "ZarghamFlow",
-  "short_name": "ZarghamFlow",
-  "description": "Private meeting and task planner",
+  "name": "Taskora — Turn plans into progress",
+  "short_name": "Taskora",
+  "description": "Meetings, tasks and team progress in one shared workspace.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4f6fa",
-  "theme_color": "#2f5bea",
+  "background_color": "#f4f7f5",
+  "theme_color": "#0e7c66",
   "icons": [
     { "src": "/icon.svg", "sizes": "192x192 512x512", "type": "image/svg+xml", "purpose": "any maskable" }
   ],

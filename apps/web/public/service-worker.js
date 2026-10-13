@@ -1,10 +1,10 @@
-const VERSION = 'zarghamflow-shell-v1';
+const VERSION = 'taskora-shell-v2';
 const SHELL = [ '/', '/manifest.webmanifest', '/icon.svg' ];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll(SHELL)));
 });
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith('zarghamflow-') && key !== VERSION).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => (key.startsWith('zarghamflow-') || key.startsWith('taskora-shell-')) && key !== VERSION).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (event) => {
   const request = event.request;
@@ -29,7 +29,7 @@ self.addEventListener('fetch', (event) => {
 });
 self.addEventListener('push', (event) => {
   const data = event.data ? event.data.json() : {};
-  event.waitUntil(self.registration.showNotification(data.title || 'ZarghamFlow reminder', {
+  event.waitUntil(self.registration.showNotification(data.title || 'Taskora reminder', {
     body: data.body || '', icon: '/icon.svg', badge: '/icon.svg', data: { url: data.url || '/', actions: data.actions || [] },
     actions: (data.actions || []).map((action) => ({ action: action.action, title: action.title }))
   }));

@@ -18,9 +18,9 @@ ZarghamFlow is a multi-user meeting and task planner with email-verified signup 
 Prerequisites: Node.js 20+ (Node 22 recommended) and npm. Docker is optional for the Node app; it is used for Mailpit and Compose deployments.
 
 1. Copy `.env.example` to `.env` and set `ADMIN_EMAIL`, `SESSION_SECRET`, and `LOGIN_SECRET`. Make both secrets independently random and at least 32 characters. Anyone can create an account by verifying their email; only the designated admin address receives administrator privileges automatically.
-2. For local email testing, run `docker compose --profile local-mail up mailpit`; use `SMTP_HOST=127.0.0.1` in `.env`. Mailpit UI is at `http://localhost:8025`. Without Docker, point SMTP settings at a development SMTP relay.
+2. For local email testing, run `docker compose --profile local-mail up mailpit`; use `SMTP_HOST=127.0.0.1` in `.env`. Mailpit UI is at `http://localhost:8025`. Without Docker, point SMTP settings at a development SMTP relay; if mail delivery is unavailable, development mode displays a one-time local sign-in link instead.
 3. Run `npm install`, then `npm install-scripts approve better-sqlite3 esbuild` and `npm rebuild better-sqlite3 esbuild` if npm 11 reports lifecycle scripts blocked.
-4. Run `npm run dev`. Vite is at `http://127.0.0.1:5173`, API at `http://127.0.0.1:3000`, OpenAPI docs at `http://127.0.0.1:3000/docs`, health at `/health`.
+4. Run `npm run dev`. The web app is at `http://127.0.0.1:3001`, API at `http://127.0.0.1:3000`, OpenAPI docs at `http://127.0.0.1:3000/docs`, and health at `/health`.
 5. Open the app, enter an email address, and follow the emailed verification link. The first verified user becomes admin if `ADMIN_EMAIL` is unset; otherwise the matching `ADMIN_EMAIL` user becomes admin. Admins can manage roles and disable accounts from the **Users** tab.
 
 The database migration is applied automatically by the API on startup. For explicit migration, run `npm run db:migrate`. Use `npm run db:seed` only in development/test mode to add sample records.

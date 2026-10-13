@@ -2,14 +2,24 @@
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
 
+class ApiResponseError extends Error {
+  constructor(message: string, readonly developmentLink?: string) {
+    super(message);
+  }
+}
+
 async function readApiResponse(response: Response) {
   const data = await response.json().catch(() => null) as {
     error?: { message?: string };
+    developmentLink?: string;
     [key: string]: unknown;
   } | null;
 
   if (!response.ok) {
-    throw new Error(data?.error?.message ?? 'The sign-in service is temporarily unavailable. Please try again.');
+    throw new ApiResponseError(
+      data?.error?.message ?? 'The sign-in service is temporarily unavailable. Please try again.',
+      typeof data?.developmentLink === 'string' ? data.developmentLink : undefined
+    );
   }
   if (!data) {
     throw new Error('The sign-in service returned an invalid response. Please try again.');
@@ -28,6 +38,7 @@ export default function SignInPage() {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [developmentLink, setDevelopmentLink] = useState('');
   const [mode, setMode] = useState<'checking' | 'form' | 'verifying'>('checking');
   const [submitting, setSubmitting] = useState(false);
   const verificationStarted = useRef(false);
@@ -65,6 +76,7 @@ export default function SignInPage() {
     event.preventDefault();
     setSubmitting(true);
     setError('');
+    setDevelopmentLink('');
     setMessage('');
     try {
       const csrfToken = await getCsrfToken();
@@ -78,6 +90,7 @@ export default function SignInPage() {
       setMessage(typeof data.message === 'string' ? data.message : 'If the address is eligible, a sign-in link will arrive shortly.');
     } catch (requestError) {
       setError((requestError as Error).message);
+      if (requestError instanceof ApiResponseError) setDevelopmentLink(requestError.developmentLink ?? '');
     } finally {
       setSubmitting(false);
     }
@@ -94,6 +107,11 @@ export default function SignInPage() {
           <>
             <p className="signin-copy">Enter your email and we’ll send a one-time link to continue.</p>
             {error && <p className="admin-alert" role="alert">{error}</p>}
+            {developmentLink && (
+              <p className="admin-notice" role="status">
+                <a className="signin-dev-link" href={developmentLink}>Continue using the local sign-in link</a>
+              </p>
+            )}
             {message && <p className="admin-notice" role="status">{message}</p>}
             <form className="signin-form" onSubmit={requestLink}>
               <label htmlFor="signin-email">Email address</label>

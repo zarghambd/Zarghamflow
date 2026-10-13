@@ -1,0 +1,66 @@
+:root {
+  color-scheme: light;
+  font-family: var(--font-body), 'DM Sans', system-ui, sans-serif;
+  color: #0f1e1a;
+  background: #f4f7f5;
+  --bg: #f4f7f5;
+  --surface: #fff;
+  --surface-2: #f0f3f1;
+  --text: #0f1e1a;
+  --muted: #40524b;
+  --border: #dde5e0;
+  --primary: #0e7c66;
+  --primary-soft: #dff1ea;
+  --green: #0a5a49;
+  --green-soft: #dff1ea;
+  --red: #8a2a16;
+  --red-soft: #fde3dd;
+  --amber: #6b4e00;
+  --amber-soft: #fff1c9;
+  --violet: #3e5ba9;
+  --shadow: 0 4px 16px rgba(15, 30, 26, .06);
+  --radius: 12px;
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+  color: #e7eeea;
+  background: #14231e;
+  --bg: #14231e;
+  --surface: #1b2e28;
+  --surface-2: #263a33;
+  --text: #e7eeea;
+  --muted: #b0c0b8;
+  --border: #354a41;
+  --primary: #43b99b;
+  --primary-soft: #24483c;
+  --green: #8bd8bd;
+  --green-soft: #24483c;
+  --red: #ff9c86;
+  --red-soft: #492b25;
+  --amber: #f1ce76;
+  --amber-soft: #44391e;
+  --violet: #a8b8f4;
+  --shadow: 0 4px 16px rgba(0, 0, 0, .2);
+}
+
+body {
+  font-family: var(--font-body), 'DM Sans', system-ui, sans-serif;
+}
+
+h1, h2, h3, .brand, .stat strong {
+  font-family: var(--font-display), 'Bricolage Grotesque', system-ui, sans-serif;
+}
+
+.logo {
+  border-radius: 9px;
+}
+
+.logo svg {
+  width: 24px;
+  height: 24px;
+}
+
+.btn.primary {
+  color: #fff;
+}

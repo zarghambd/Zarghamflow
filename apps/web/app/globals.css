@@ -101,6 +101,7 @@ li + li { margin-top: 10px; }
 .admin-alert, .admin-notice { margin: 0 0 16px; padding: 11px 14px; border: 1px solid var(--border); border-radius: 6px; }
 .admin-alert { border-color: #e8b1a5; background: var(--tk-danger-bg); color: var(--tk-danger-ink); }
 .admin-notice { border-color: #a7d2c5; background: var(--tk-success-bg); color: var(--tk-success-ink); }
+.signin-dev-link { font-weight: 700; text-decoration: underline; }
 .admin-message { max-width: 620px; border-radius: 8px; }
 .admin-message h2 { margin-bottom: 8px; font-size: 21px; }
 .admin-message p { margin-bottom: 18px; color: var(--muted); }

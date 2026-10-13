@@ -47,8 +47,17 @@ export function registerAuth(app: FastifyInstance): void {
       .run(randomUUID(), email, tokenHash, 'magic_link', iso(new Date(now.getTime() + TEN_MINUTES)), iso(now), ip);
     const url = new URL('/signin', config.APP_URL);
     url.searchParams.set('token', rawToken);
-    await sendMail(email, 'Your ZarghamFlow sign-in link', `Use this one-time link within 10 minutes to sign in or finish creating your account:\n\n${url.toString()}\n\nIf you did not request it, ignore this message.`,
-      `<p>Use this one-time link within 10 minutes to sign in or finish creating your account:</p><p><a href="${url.toString()}">Continue to ZarghamFlow</a></p><p>If you did not request it, ignore this message.</p>`);
+    try {
+      await sendMail(email, 'Your ZarghamFlow sign-in link', `Use this one-time link within 10 minutes to sign in or finish creating your account:\n\n${url.toString()}\n\nIf you did not request it, ignore this message.`,
+        `<p>Use this one-time link within 10 minutes to sign in or finish creating your account:</p><p><a href="${url.toString()}">Continue to ZarghamFlow</a></p><p>If you did not request it, ignore this message.</p>`);
+    } catch (error) {
+      if (config.NODE_ENV !== 'development') throw error;
+      request.log.error({ err: error }, 'Magic-link email delivery failed; returning a local development link');
+      return reply.code(503).send({
+        error: { code: 'EMAIL_DELIVERY_FAILED', message: 'Email could not be sent because the local mail server is unavailable.' },
+        developmentLink: url.toString()
+      });
+    }
     return reply.send(generic);
   };
   app.post('/api/v1/auth/request', requestLink);

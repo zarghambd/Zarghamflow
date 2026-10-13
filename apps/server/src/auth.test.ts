@@ -100,7 +100,7 @@ describe('single-owner email authentication', () => {
     expect(takeTestMails()).toHaveLength(2);
   });
 
-  it('rejects mutations without CSRF and consumes a sign-in link exactly once', async () => {
+  it('rejects CSRF and token replays without a session, but allows an authenticated retry', async () => {
     const rejected = await app.inject({ method: 'POST', url: '/api/v1/auth/request', payload: { email: ownerEmail } });
     expect(rejected.statusCode).toBe(403);
 
@@ -111,6 +111,13 @@ describe('single-owner email authentication', () => {
     const sessionCookie = setCookies(signedIn).find((value) => value.startsWith('zf_session='));
     expect(sessionCookie).toBeDefined();
     expect((await verifyToken(token, pair)).statusCode).toBe(400);
+    const retry = await app.inject({
+      method: 'POST', url: '/api/v1/auth/verify',
+      headers: { cookie: `${pair.cookie}; ${sessionCookie}`, 'x-csrf-token': pair.token },
+      payload: { token }
+    });
+    expect(retry.statusCode).toBe(200);
+    expect((sqlite.prepare('SELECT COUNT(*) AS count FROM sessions').get() as { count: number }).count).toBe(1);
     const me = await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: { cookie: `${pair.cookie}; ${sessionCookie}` } });
     expect(me.statusCode).toBe(200);
     expect((me.json() as { user: { email: string } }).user.email).toBe(ownerEmail);

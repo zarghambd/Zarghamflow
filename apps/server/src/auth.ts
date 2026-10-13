@@ -68,10 +68,23 @@ export function registerAuth(app: FastifyInstance): void {
     if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
     const now = iso(new Date());
     const tokenHash = sha256(parsed.data.token);
-    const token = sqlite.prepare("SELECT id,email FROM login_tokens WHERE token_hash = ? AND kind = 'magic_link' AND consumed_at IS NULL AND expires_at > ?")
-      .get(tokenHash, now) as { id: string; email: string } | undefined;
+    const token = sqlite.prepare("SELECT id,email,consumed_at FROM login_tokens WHERE token_hash = ? AND kind = 'magic_link' AND expires_at > ?")
+      .get(tokenHash, now) as { id: string; email: string; consumed_at: string | null } | undefined;
     if (!token) {
       return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
+    }
+    if (token.consumed_at) {
+      const rawSession = request.cookies[SESSION_COOKIE] ?? '';
+      const session = rawSession
+        ? sqlite.prepare(`SELECT users.email,users.role FROM sessions
+            JOIN users ON users.id=sessions.user_id
+            WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>? AND users.active=1`)
+          .get(sha256(rawSession), now) as { email: string; role: 'admin'|'user' } | undefined
+        : undefined;
+      if (!session || session.email.toLowerCase() !== token.email.toLowerCase()) {
+        return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
+      }
+      return reply.send({ ok: true, user: { email: session.email, role: session.role }, redirect: session.role === 'admin' ? '/admin' : '/planner' });
     }
     const user = sqlite.transaction(() => {
       const current = sqlite.prepare('SELECT id,email,timezone,locale,settings_json,role,active FROM users WHERE email = ? COLLATE NOCASE').get(token.email) as UserRow | undefined;

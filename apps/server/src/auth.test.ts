@@ -73,7 +73,7 @@ beforeAll(async () => {
   failNextTestEmails = mail.failNextTestEmails;
   scheduleEntityReminders = scheduler.scheduleEntityReminders;
   runReminderTick = scheduler.runReminderTick;
-  migrations.applyMigrations();
+  await migrations.applyMigrations();
   app = await buildApp();
   await app.ready();
 });
@@ -201,36 +201,36 @@ describe('multi-user signup and administration', () => {
 });
 
 describe('persistent reminder scheduling', () => {
-  it('reactivates unchanged pending reminders after an item edit and replaces changed times', () => {
+  it('reactivates unchanged pending reminders after an item edit and replaces changed times', async () => {
     const userId = randomUUID(), meetingId = randomUUID(), stamp = new Date().toISOString();
     sqlite.prepare('INSERT INTO users(id,email,timezone,locale,settings_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(userId, ownerEmail, 'Europe/London', 'en-GB', '{}', stamp, stamp);
     const date = DateTime.now().setZone('Europe/London').plus({ days: 3 }).toISODate()!;
     const meeting = { id: meetingId, title: 'Review', date, start: '10:00', end: '11:00', status: 'Scheduled', reminderLeadMinutes: [60,15] };
-    scheduleEntityReminders(userId, 'meeting', meeting, 'Europe/London', { emailEnabled: true, pushEnabled: true });
-    scheduleEntityReminders(userId, 'meeting', meeting, 'Europe/London', { emailEnabled: true, pushEnabled: true });
+    await scheduleEntityReminders(userId, 'meeting', meeting, 'Europe/London', { emailEnabled: true, pushEnabled: true });
+    await scheduleEntityReminders(userId, 'meeting', meeting, 'Europe/London', { emailEnabled: true, pushEnabled: true });
     expect((sqlite.prepare("SELECT COUNT(*) AS count FROM reminders WHERE state='pending'").get() as {count:number}).count).toBe(4);
 
     const moved = { ...meeting, date: DateTime.fromISO(date).plus({days:1}).toISODate()! };
-    scheduleEntityReminders(userId, 'meeting', moved, 'Europe/London', { emailEnabled: true, pushEnabled: true });
+    await scheduleEntityReminders(userId, 'meeting', moved, 'Europe/London', { emailEnabled: true, pushEnabled: true });
     expect((sqlite.prepare("SELECT COUNT(*) AS count FROM reminders WHERE state='pending'").get() as {count:number}).count).toBe(4);
     expect((sqlite.prepare("SELECT COUNT(*) AS count FROM reminders WHERE state='cancelled'").get() as {count:number}).count).toBe(4);
   });
 
-  it('fires date-only task reminders at 09:00 local time', () => {
+  it('fires date-only task reminders at 09:00 local time', async () => {
     const userId = randomUUID(), taskId = randomUUID(), stamp = new Date().toISOString();
     sqlite.prepare('INSERT INTO users(id,email,timezone,locale,settings_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(userId, ownerEmail, 'Europe/London', 'en-GB', '{}', stamp, stamp);
     const dueDate = DateTime.now().setZone('Europe/London').plus({ days: 3 }).toISODate()!;
-    scheduleEntityReminders(userId, 'task', { id:taskId, title:'Prepare', dueDate, dueTime:'', status:'To Do' }, 'Europe/London', { emailEnabled:true, pushEnabled:false });
+    await scheduleEntityReminders(userId, 'task', { id:taskId, title:'Prepare', dueDate, dueTime:'', status:'To Do' }, 'Europe/London', { emailEnabled:true, pushEnabled:false });
     const reminder = sqlite.prepare("SELECT fire_at FROM reminders WHERE target_type='task' AND target_id=?").get(taskId) as {fire_at:string};
     expect(reminder.fire_at).toBe(localToUtc(dueDate,'09:00','Europe/London'));
   });
 
-  it('defers 08:00 meeting follow-ups until quiet hours end', () => {
+  it('defers 08:00 meeting follow-ups until quiet hours end', async () => {
     const userId=randomUUID(),meetingId=randomUUID(),stamp=new Date().toISOString();
     sqlite.prepare('INSERT INTO users(id,email,timezone,locale,settings_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(userId,ownerEmail,'Europe/London','en-GB','{}',stamp,stamp);
     const followUpDate=DateTime.now().setZone('Europe/London').plus({days:4}).toISODate()!;
     const meetingDate=DateTime.fromISO(followUpDate).minus({days:1}).toISODate()!;
-    scheduleEntityReminders(userId,'meeting',{id:meetingId,title:'Follow-up call',date:meetingDate,start:'10:00',end:'10:30',status:'Completed',followUpDate,reminderLeadMinutes:null},'Europe/London',{emailEnabled:true,pushEnabled:false,followUpEnabled:true,quietStart:'07:00',quietEnd:'09:30'});
+    await scheduleEntityReminders(userId,'meeting',{id:meetingId,title:'Follow-up call',date:meetingDate,start:'10:00',end:'10:30',status:'Completed',followUpDate,reminderLeadMinutes:null},'Europe/London',{emailEnabled:true,pushEnabled:false,followUpEnabled:true,quietStart:'07:00',quietEnd:'09:30'});
     const followUp=sqlite.prepare("SELECT fire_at FROM reminders WHERE target_type='followup' AND target_id=?").get(meetingId) as {fire_at:string};
     expect(followUp.fire_at).toBe(localToUtc(followUpDate,'09:30','Europe/London'));
   });

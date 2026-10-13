@@ -5,6 +5,7 @@ const envSchema = z.object({
   HOST: z.string().default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_PATH: z.string().default('./data/zarghamflow.sqlite'),
+  DATABASE_URL: z.string().url().optional(),
   OWNER_EMAIL: z.string().email().optional(),
   ADMIN_EMAIL: z.string().email().optional(),
   APP_URL: z.string().url().default('http://localhost:5173'),

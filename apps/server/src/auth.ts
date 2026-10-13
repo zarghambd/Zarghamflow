@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { loginRequestSchema, loginVerifySchema } from '@zarghamflow/shared';
 import { config } from './config.js';
-import { sqlite } from './db/index.js';
+import { dbAll, dbGet, dbRun, dbTransaction } from './db/index.js';
 import { sendMail } from './mail.js';
 import { hashIp, randomToken, safeEqual, sha256 } from './security.js';
 
@@ -34,17 +34,17 @@ export function registerAuth(app: FastifyInstance): void {
     const email = parsed.data.email.trim().toLowerCase();
     const ip = hashIp(request.ip);
     const generic = { ok: true, message: 'If the address is eligible, a sign-in link will arrive shortly.' };
-    const recentByIp = sqlite.prepare("SELECT COUNT(*) AS count FROM login_tokens WHERE ip_hash = ? AND kind = 'magic_link' AND created_at > ?").get(ip, iso(new Date(Date.now() - 15 * 60_000))) as { count: number };
-    const recentByAccount = sqlite.prepare("SELECT COUNT(*) AS count FROM login_tokens WHERE email = ? COLLATE NOCASE AND kind = 'magic_link' AND created_at > ?").get(email, iso(new Date(Date.now() - 15 * 60_000))) as { count: number };
-    const existing = sqlite.prepare('SELECT active FROM users WHERE email=? COLLATE NOCASE').get(email) as {active:number}|undefined;
-    if (recentByIp.count >= 5 || recentByAccount.count >= 5 || existing?.active === 0) return reply.send(generic);
+    const recentByIp = await dbGet<{ count: number | string }>("SELECT COUNT(*) AS count FROM login_tokens WHERE ip_hash = ? AND kind = 'magic_link' AND created_at > ?", [ip, iso(new Date(Date.now() - 15 * 60_000))]);
+    const recentByAccount = await dbGet<{ count: number | string }>("SELECT COUNT(*) AS count FROM login_tokens WHERE lower(email) = lower(?) AND kind = 'magic_link' AND created_at > ?", [email, iso(new Date(Date.now() - 15 * 60_000))]);
+    const existing = await dbGet<{ active: number }>('SELECT active FROM users WHERE lower(email)=lower(?)', [email]);
+    if (Number(recentByIp?.count ?? 0) >= 5 || Number(recentByAccount?.count ?? 0) >= 5 || existing?.active === 0) return reply.send(generic);
 
     const now = new Date();
     const rawToken = randomToken(32);
     const tokenHash = sha256(rawToken);
-    sqlite.prepare('DELETE FROM login_tokens WHERE expires_at < ? OR consumed_at IS NOT NULL').run(iso(now));
-    sqlite.prepare('INSERT INTO login_tokens (id,email,token_hash,kind,expires_at,created_at,ip_hash) VALUES (?,?,?,?,?,?,?)')
-      .run(randomUUID(), email, tokenHash, 'magic_link', iso(new Date(now.getTime() + TEN_MINUTES)), iso(now), ip);
+    await dbRun('DELETE FROM login_tokens WHERE expires_at < ? OR consumed_at IS NOT NULL', [iso(now)]);
+    await dbRun('INSERT INTO login_tokens (id,email,token_hash,kind,expires_at,created_at,ip_hash) VALUES (?,?,?,?,?,?,?)',
+      [randomUUID(), email, tokenHash, 'magic_link', iso(new Date(now.getTime() + TEN_MINUTES)), iso(now), ip]);
     const url = new URL('/signin', config.APP_URL);
     url.searchParams.set('token', rawToken);
     try {
@@ -68,52 +68,57 @@ export function registerAuth(app: FastifyInstance): void {
     if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
     const now = iso(new Date());
     const tokenHash = sha256(parsed.data.token);
-    const token = sqlite.prepare("SELECT id,email,consumed_at FROM login_tokens WHERE token_hash = ? AND kind = 'magic_link' AND expires_at > ?")
-      .get(tokenHash, now) as { id: string; email: string; consumed_at: string | null } | undefined;
+    const token = await dbGet<{ id: string; email: string; consumed_at: string | null }>("SELECT id,email,consumed_at FROM login_tokens WHERE token_hash = ? AND kind = 'magic_link' AND expires_at > ?", [tokenHash, now]);
     if (!token) {
       return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
     }
     if (token.consumed_at) {
       const rawSession = request.cookies[SESSION_COOKIE] ?? '';
       const session = rawSession
-        ? sqlite.prepare(`SELECT users.email,users.role FROM sessions
+        ? await dbGet<{ email: string; role: 'admin'|'user' }>(`SELECT users.email,users.role FROM sessions
             JOIN users ON users.id=sessions.user_id
-            WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>? AND users.active=1`)
-          .get(sha256(rawSession), now) as { email: string; role: 'admin'|'user' } | undefined
+            WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>? AND users.active=1`,
+          [sha256(rawSession), now])
         : undefined;
       if (!session || session.email.toLowerCase() !== token.email.toLowerCase()) {
         return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
       }
       return reply.send({ ok: true, user: { email: session.email, role: session.role }, redirect: session.role === 'admin' ? '/admin' : '/planner' });
     }
-    const user = sqlite.transaction(() => {
-      const current = sqlite.prepare('SELECT id,email,timezone,locale,settings_json,role,active FROM users WHERE email = ? COLLATE NOCASE').get(token.email) as UserRow | undefined;
-      const hasAdmin = (sqlite.prepare("SELECT COUNT(*) AS count FROM users WHERE role='admin' AND active=1").get() as {count:number}).count > 0;
-      const configuredAdmin = config.ADMIN_EMAIL?.trim().toLowerCase();
-      if (current) {
-        if (!current.active) return undefined;
-        if ((!hasAdmin && !configuredAdmin) || (configuredAdmin && current.email.toLowerCase() === configuredAdmin)) {
-          sqlite.prepare("UPDATE users SET role='admin',updated_at=? WHERE id=?").run(now,current.id);
-          current.role='admin';
-        }
-        return current;
-      }
-      const role = configuredAdmin ? (token.email.toLowerCase() === configuredAdmin ? 'admin' : 'user') : (!hasAdmin ? 'admin' : 'user');
-      const created = { id: randomUUID(), email: token.email.toLowerCase(), timezone: 'UTC', locale: 'en-GB', settings_json: '{}', role, active: 1, created_at: now, updated_at: now };
-      sqlite.prepare('INSERT INTO users (id,email,timezone,locale,settings_json,role,active,created_at,updated_at) VALUES (@id,@email,@timezone,@locale,@settings_json,@role,@active,@created_at,@updated_at)').run(created);
-      sqlite.prepare('INSERT INTO reminder_prefs (user_id,prefs_json,updated_at) VALUES (?,?,?)').run(created.id, JSON.stringify({}), now);
-      return created;
-    })();
-    if (!user) return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
-    sqlite.prepare('UPDATE login_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL').run(now, token.id);
     const rawSession = randomToken(48);
     const sessionId = randomUUID();
     const expiresAt = iso(new Date(Date.now() + SESSION_MS));
     const userAgent = String(request.headers['user-agent'] ?? 'Unknown device').slice(0, 200);
-    sqlite.prepare('INSERT INTO sessions (id,user_id,token_hash,device,ip_hash,created_at,last_seen_at,expires_at) VALUES (?,?,?,?,?,?,?,?)')
-      .run(sessionId, user.id, sha256(rawSession), userAgent, hashIp(request.ip), now, now, expiresAt);
-    sqlite.prepare('INSERT INTO audit_log (id,user_id,event,details_json,ip_hash,created_at) VALUES (?,?,?,?,?,?)')
-      .run(randomUUID(), user.id, 'sign_in', JSON.stringify({ device: userAgent }), hashIp(request.ip), now);
+    const result = await dbTransaction(async (database) => {
+      const current = await database.get<UserRow>('SELECT id,email,timezone,locale,settings_json,role,active FROM users WHERE lower(email) = lower(?)', [token.email]);
+      if (current && !current.active) return undefined;
+      const claimed = await database.run("UPDATE login_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND expires_at > ?", [now, token.id, now]);
+      if (!claimed.changes) return undefined;
+      const adminCount = await database.get<{ count: number | string }>("SELECT COUNT(*) AS count FROM users WHERE role='admin' AND active=1");
+      const hasAdmin = Number(adminCount?.count ?? 0) > 0;
+      const configuredAdmin = config.ADMIN_EMAIL?.trim().toLowerCase();
+      let user: UserRow;
+      if (current) {
+        if ((!hasAdmin && !configuredAdmin) || (configuredAdmin && current.email.toLowerCase() === configuredAdmin)) {
+          await database.run("UPDATE users SET role='admin',updated_at=? WHERE id=?", [now, current.id]);
+          current.role='admin';
+        }
+        user = current;
+      } else {
+        const role = configuredAdmin ? (token.email.toLowerCase() === configuredAdmin ? 'admin' : 'user') : (!hasAdmin ? 'admin' : 'user');
+        user = { id: randomUUID(), email: token.email.toLowerCase(), timezone: 'UTC', locale: 'en-GB', settings_json: '{}', role, active: 1 };
+        await database.run('INSERT INTO users (id,email,timezone,locale,settings_json,role,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
+          [user.id, user.email, user.timezone, user.locale, user.settings_json, user.role, user.active, now, now]);
+        await database.run('INSERT INTO reminder_prefs (user_id,prefs_json,updated_at) VALUES (?,?,?)', [user.id, JSON.stringify({}), now]);
+      }
+      await database.run('INSERT INTO sessions (id,user_id,token_hash,device,ip_hash,created_at,last_seen_at,expires_at) VALUES (?,?,?,?,?,?,?,?)',
+        [sessionId, user.id, sha256(rawSession), userAgent, hashIp(request.ip), now, now, expiresAt]);
+      await database.run('INSERT INTO audit_log (id,user_id,event,details_json,ip_hash,created_at) VALUES (?,?,?,?,?,?)',
+        [randomUUID(), user.id, 'sign_in', JSON.stringify({ device: userAgent }), hashIp(request.ip), now]);
+      return { user };
+    });
+    const user = result?.user;
+    if (!user) return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
     reply.setCookie(SESSION_COOKIE, rawSession, { ...cookieOptions(secure), maxAge: SESSION_MS / 1000 });
     return reply.send({ ok: true, user: { email: user.email, role: user.role }, redirect: user.role === 'admin' ? '/admin' : '/planner' });
   });
@@ -130,16 +135,16 @@ export function registerAuth(app: FastifyInstance): void {
     if (request.url.startsWith('/api/v1/auth/request') || request.url.startsWith('/api/v1/auth/signup') || request.url.startsWith('/api/v1/auth/verify') || request.url.startsWith('/api/v1/auth/actions/')) return;
     const rawSession = request.cookies[SESSION_COOKIE];
     if (!rawSession) return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Sign in required.' } });
-    const session = sqlite.prepare(`SELECT sessions.id,sessions.user_id,sessions.token_hash,sessions.expires_at,users.email,users.role,users.active
+    const session = await dbGet<SessionRow>(`SELECT sessions.id,sessions.user_id,sessions.token_hash,sessions.expires_at,users.email,users.role,users.active
       FROM sessions JOIN users ON users.id = sessions.user_id
-      WHERE sessions.token_hash = ? AND sessions.revoked_at IS NULL`).get(sha256(rawSession)) as SessionRow | undefined;
+      WHERE sessions.token_hash = ? AND sessions.revoked_at IS NULL`, [sha256(rawSession)]);
     if (!session || !session.active || session.expires_at <= iso(new Date())) {
-      if (session) sqlite.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ?').run(iso(new Date()), session.id);
+      if (session) await dbRun('UPDATE sessions SET revoked_at = ? WHERE id = ?', [iso(new Date()), session.id]);
       reply.clearCookie(SESSION_COOKIE, cookieOptions(secure));
       return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Sign in required.' } });
     }
     const nextExpiry = iso(new Date(Date.now() + SESSION_MS));
-    sqlite.prepare('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?').run(iso(new Date()), nextExpiry, session.id);
+    await dbRun('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?', [iso(new Date()), nextExpiry, session.id]);
     reply.setCookie(SESSION_COOKIE, rawSession, { ...cookieOptions(secure), maxAge: SESSION_MS / 1000 });
     request.owner = { id: session.user_id, email: session.email, role: session.role, sessionId: session.id };
     const csrfToken = request.cookies[CSRF_COOKIE];
@@ -149,14 +154,14 @@ export function registerAuth(app: FastifyInstance): void {
   app.get('/api/v1/auth/me', async (request) => ({ user: { email: request.owner?.email, role: request.owner?.role } }));
 
   app.post('/api/v1/auth/logout', async (request, reply) => {
-    if (request.owner) sqlite.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ?').run(iso(new Date()), request.owner.sessionId);
+    if (request.owner) await dbRun('UPDATE sessions SET revoked_at = ? WHERE id = ?', [iso(new Date()), request.owner.sessionId]);
     reply.clearCookie(SESSION_COOKIE, cookieOptions(secure));
     return { ok: true };
   });
 
   app.post('/api/v1/auth/logout-all', async (request, reply) => {
     const owner = request.owner;
-    if (owner) sqlite.prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').run(iso(new Date()), owner.id);
+    if (owner) await dbRun('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL', [iso(new Date()), owner.id]);
     reply.clearCookie(SESSION_COOKIE, cookieOptions(secure));
     return { ok: true };
   });
@@ -164,7 +169,7 @@ export function registerAuth(app: FastifyInstance): void {
   app.get('/api/v1/auth/sessions', async (request) => {
     const owner = request.owner;
     if (!owner) return { items: [] };
-    const rows = sqlite.prepare('SELECT id,device,created_at,last_seen_at,expires_at FROM sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY last_seen_at DESC').all(owner.id) as Array<{ id: string; device: string; created_at: string; last_seen_at: string; expires_at: string }>;
+    const rows = await dbAll<{ id: string; device: string; created_at: string; last_seen_at: string; expires_at: string }>('SELECT id,device,created_at,last_seen_at,expires_at FROM sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY last_seen_at DESC', [owner.id]);
     return { items: rows.map((row) => ({ ...row, current: row.id === owner.sessionId })) };
   });
 }

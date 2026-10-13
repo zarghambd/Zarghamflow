@@ -20,6 +20,7 @@
     "@fastify/swagger": "^9.5.1",
     "@fastify/swagger-ui": "^6.1.2",
     "@fastify/websocket": "^11.0.2",
+    "@neondatabase/serverless": "^1.0.1",
     "@vercel/connect": "^2.4.1",
     "@zarghamflow/shared": "*",
     "better-sqlite3": "^12.2.0",

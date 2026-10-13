@@ -12,9 +12,10 @@ const transport = config.RESEND_API_KEY
     });
 type MailTransport = ReturnType<typeof nodemailer.createTransport>;
 let vercelTransport: Promise<MailTransport> | undefined;
-  const usesResend = process.env.VERCEL === '1' || Boolean(config.RESEND_API_KEY);
+const usesResend = process.env.VERCEL === '1' || Boolean(config.RESEND_API_KEY);
 
 function getDeliveryTransport(): Promise<MailTransport> {
+  if (config.RESEND_API_KEY) return Promise.resolve(transport);
   if (process.env.VERCEL !== '1') return Promise.resolve(transport);
 
   vercelTransport ??= getToken('resend/zarghamflow', { subject: { type: 'app' } }).then((apiKey) =>

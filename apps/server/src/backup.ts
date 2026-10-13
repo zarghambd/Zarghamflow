@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import { mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { sqlite } from './db/index.js';
+import { isPostgres, sqlite } from './db/index.js';
 import { config } from './config.js';
+
+if (isPostgres) throw new Error('The backup command only supports SQLite. Configure database backups in the Neon console.');
 
 const dbPath = resolve(process.cwd(), config.DATABASE_PATH);
 const backupDir = resolve(process.cwd(), 'backups');

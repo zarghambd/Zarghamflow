@@ -1,10 +1,10 @@
 import 'dotenv/config';
-import { sqlite } from './db/index.js';
+import { closeDatabase } from './db/index.js';
 import { applyMigrations } from './db/migrations.js';
 
 try {
-  applyMigrations();
+  await applyMigrations();
   console.log('Database migrations are up to date.');
 } finally {
-  sqlite.close();
+  await closeDatabase();
 }

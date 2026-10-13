@@ -1,8 +1,8 @@
 # ZarghamFlow
 
-ZarghamFlow is a multi-user meeting and task planner with email-verified signup and administrator-managed accounts. The production app is a Fastify/TypeScript service with SQLite, a Vite TypeScript PWA, email magic links, server-side reminders, Web Push, and an offline IndexedDB outbox. The original `index.html` remains in the repository as the legacy app and localStorage backup reference.
+ZarghamFlow is a multi-user meeting and task planner with email-verified signup and administrator-managed accounts. The production app is a Fastify/TypeScript service with Neon/PostgreSQL, a Vite TypeScript PWA, email magic links, server-side reminders, Web Push, and an offline IndexedDB outbox. SQLite remains the local-development database. The original `index.html` remains in the repository as the legacy app and localStorage backup reference.
 
-**Stack choice:** Node 22, Fastify, Zod, Drizzle/SQLite, Vite/vanilla TypeScript, Nodemailer/Resend SMTP, and Web Push. SQLite is a good fit for a small team on one VPS; keep its persistent volume backed up and do not run multiple independent app instances against a local file.
+**Stack choice:** Node 22, Fastify, Zod, SQLite for local development, Neon/PostgreSQL for Vercel, Vite/vanilla TypeScript, Nodemailer/Resend SMTP, and Web Push.
 
 ## Structure
 
@@ -32,6 +32,7 @@ The database migration is applied automatically by the API on startup. For expli
 | `NODE_ENV` | Runtime mode | `development` |
 | `HOST` / `PORT` | API bind address | `127.0.0.1` / `3000` |
 | `DATABASE_PATH` | SQLite file location | `./data/zarghamflow.sqlite` |
+| `DATABASE_URL` | PostgreSQL connection URL for Neon deployments | Unset for local SQLite |
 | `ADMIN_EMAIL` | Designated initial administrator email; if unset, the first verified account becomes admin | Optional but recommended |
 | `OWNER_EMAIL` | Legacy compatibility email; no longer restricts signup | Optional |
 | `APP_URL` | Public app origin for sign-in/action links | `http://localhost:5173` |
@@ -40,7 +41,7 @@ The database migration is applied automatically by the API on startup. For expli
 | `SMTP_HOST`, `SMTP_PORT` | SMTP endpoint | `127.0.0.1`, `1025` |
 | `SMTP_USER`, `SMTP_PASS` | Optional SMTP credentials | Optional |
 | `SMTP_FROM` | From identity | `ZarghamFlow <no-reply@localhost>` |
-| `RESEND_API_KEY` | Use Resend SMTP instead of `SMTP_*` | Optional; API key from Resend |
+| `RESEND_API_KEY`, `RESEND_FROM` | Use Resend SMTP instead of `SMTP_*` | Optional; API key and verified sender from Resend |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push credentials | Optional until push enabled |
 | `VAPID_SUBJECT` | VAPID contact identity | `mailto:you@example.com` |
 | `TRUST_PROXY` | Trust reverse-proxy headers | `false`; set `true` behind Caddy |
@@ -51,18 +52,21 @@ Never commit `.env`. Generate secrets with a password manager or `node -e "conso
 
 ## Production Deployment
 
-### Vercel frontend with Railway API (no Docker)
+### Vercel web and API with Neon
 
-Vercel Functions have an ephemeral, read-only application filesystem, so they must not host this app's SQLite database. Keep the web service on Vercel and run the Fastify API as a single Railway service with a persistent volume:
+Use two Vercel projects from this repository: a Next.js web project and a Fastify API project. Neon supplies the persistent PostgreSQL database; do not use SQLite or `DATABASE_PATH` for the Vercel API.
 
-1. Create a Railway service from the repository with the repository root (`/`) as its root directory. `railway.json` supplies the build, start, and `/health` check commands; it uses Railpack and does not require a Dockerfile.
-2. Attach a Railway volume to the API service at `/data`. In Railway Variables set `NODE_ENV=production`, `HOST=0.0.0.0`, `DATABASE_PATH=/data/zarghamflow.sqlite`, `TRUST_PROXY=true`, `APP_URL=https://www.zargham-daily-update.website`, `ADMIN_EMAIL`, `SESSION_SECRET`, and `LOGIN_SECRET`. Use two distinct random secrets of at least 32 characters.
-3. Configure outbound email on the API service with a verified provider, such as `RESEND_API_KEY` and `RESEND_FROM`; local Mailpit is not a production mailer. Set any optional VAPID variables only if enabling Web Push.
-4. Generate a Railway public domain for the API and confirm its `/health` endpoint returns HTTP 200. Keep the API at one replica because its SQLite database is a single-file volume.
-5. In the Vercel web project's Production environment variables, set `FASTIFY_API_URL` to the Railway API origin (for example, `https://your-api.up.railway.app`, without an API path). Redeploy the Vercel web service after setting it. Add the same variable for Preview only if Preview deployments should use that API.
-6. Verify `https://www.zargham-daily-update.website/api/auth/csrf`, then request a fresh sign-in link. Set `APP_URL` to the exact public web origin so email links return to the deployed site.
+1. Create a Neon project and copy its pooled PostgreSQL connection string. Keep it private; do not paste it into source control or chat.
+2. Create a Vercel API project from this repository and set its Root Directory to `apps/server`. Use Node.js 22. If Vercel does not build the workspace package automatically, set the build command to `cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server`.
+3. In the API project's Production environment, set `NODE_ENV=production`, `HOST=0.0.0.0`, `DATABASE_URL` to the Neon pooled connection string, `TRUST_PROXY=true`, `APP_URL` to the public web origin, `ADMIN_EMAIL`, and separate random values for `SESSION_SECRET` and `LOGIN_SECRET` (at least 32 characters each). Configure email using a verified sender with `RESEND_API_KEY` and `RESEND_FROM`. Do not set `DATABASE_PATH`.
+4. Deploy the API project and verify its `/health` URL returns HTTP 200. API startup applies the PostgreSQL schema migrations automatically.
+5. Keep the web project configured with the repository root and existing `vercel.json` web service. Set its Production `FASTIFY_API_URL` to the API project's origin only (for example, `https://your-api.vercel.app`, with no `/api` suffix), then redeploy the web project.
+6. Verify the web project's `/api/auth/csrf` returns a CSRF token, then request a new sign-in link. Email sign-in links use the API project's `APP_URL`; set it to the exact public web origin.
+7. Add Preview environment variables only if Preview builds should connect to a database and API. Do not point Preview at Production unless that is intentional.
 
-Do not set `DATABASE_PATH` to `/tmp` on Vercel: it is not persistent or shared between function instances. The Vercel project should deploy only the web service; the Fastify service is deployed separately on Railway.
+The first API startup against a new Neon database creates an empty schema. No production SQLite file or export was available during this setup, so existing live records have not been migrated. Keep the old deployment untouched and do not treat the new database as a data-preserving cutover until those records have been recovered and imported. Reminder delivery also depends on a continuously running worker; Vercel Functions do not guarantee that a background interval stays alive between requests.
+
+The Docker Compose/Caddy instructions below are only for self-hosting on a VPS; they are not required for Vercel + Neon.
 
 Docker Compose includes the app, Caddy TLS reverse proxy, a Mailpit service for local testing, and an optional daily backup service. Deploy on a small VPS with Docker Engine and Compose installed:
 
@@ -77,7 +81,7 @@ SQLite volume advice: restrict host filesystem permissions, encrypt the VPS disk
 
 ### Backup and Restore
 
-A daily backup runs via the optional Compose profile. To create one manually from the project root, use `npm run db:backup --workspace @zarghamflow/server` (with the production environment and database volume available). The backup command uses SQLite's online backup API and prunes local snapshots older than 14 days.
+A daily SQLite backup runs via the optional Compose profile. To create one manually from the project root, use `npm run db:backup --workspace @zarghamflow/server` (with the production environment and database volume available). The command uses SQLite's online backup API and prunes local snapshots older than 14 days. For Neon, configure and verify database backup/point-in-time recovery in the Neon console; the local SQLite backup command does not back up PostgreSQL.
 
 To restore: stop the app (`docker compose stop app`), copy the chosen `.sqlite` file over the database file in the `zarghamflow-data` volume, ensure ownership/read permissions match the container, then run `docker compose up -d app`. Keep an untouched copy before replacement. For cross-version moves, start the app and allow migrations to apply, then validate `/health` and export a JSON backup from the UI.
 

@@ -4,9 +4,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import fastifyStatic from '@fastify/static';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
 import { config } from './config.js';
 import { registerAuth } from './auth.js';
 import { registerRoutes } from './routes.js';
@@ -50,14 +48,6 @@ export async function buildApp() {
     registerAuth(api);
     await registerRoutes(api);
   });
-
-  if (config.NODE_ENV === 'production') {
-    await app.register(fastifyStatic, { root: resolve(process.cwd(), '../web/dist'), prefix: '/' });
-    app.setNotFoundHandler((request, reply) => {
-      if (request.url.startsWith('/api/')) return reply.code(404).send({ error: { code: 'NOT_FOUND', message: 'Route not found.' } });
-      return reply.sendFile('index.html');
-    });
-  }
 
   return app;
 }

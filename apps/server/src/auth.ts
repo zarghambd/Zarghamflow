@@ -93,7 +93,7 @@ export function registerAuth(app: FastifyInstance): void {
     sqlite.prepare('INSERT INTO audit_log (id,user_id,event,details_json,ip_hash,created_at) VALUES (?,?,?,?,?,?)')
       .run(randomUUID(), user.id, 'sign_in', JSON.stringify({ device: userAgent }), hashIp(request.ip), now);
     reply.setCookie(SESSION_COOKIE, rawSession, { ...cookieOptions(secure), maxAge: SESSION_MS / 1000 });
-    return reply.send({ ok: true, user: { email: user.email, role: user.role }, redirect: '/' });
+    return reply.send({ ok: true, user: { email: user.email, role: user.role }, redirect: user.role === 'admin' ? '/admin' : '/planner' });
   });
 
   app.addHook('preHandler', async (request, reply) => {

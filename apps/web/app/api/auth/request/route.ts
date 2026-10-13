@@ -39,7 +39,15 @@ export async function POST(request: Request) {
 
   const url = new URL('/signin', process.env.APP_URL ?? 'http://localhost:5173');
   url.searchParams.set('token', rawToken);
-  await sendMagicLinkEmail(email, url.toString());
+  try {
+    await sendMagicLinkEmail(email, url.toString());
+  } catch (error) {
+    console.error('Sign-in email delivery failed', error);
+    return NextResponse.json(
+      { error: { code: 'EMAIL_DELIVERY_FAILED', message: 'Sign-in email delivery is unavailable. Check the SMTP host, credentials, and sender address, then try again.' } },
+      { status: 503 }
+    );
+  }
 
   return NextResponse.json(generic);
 }

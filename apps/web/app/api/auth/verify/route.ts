@@ -80,7 +80,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } }, { status: 400 });
   }
 
-  const response = NextResponse.json({ ok: true, user: { email: user.email, role: user.role }, redirect: '/' });
+  const response = NextResponse.json({
+    ok: true,
+    user: { email: user.email, role: user.role },
+    redirect: user.role === 'admin' ? '/admin' : '/planner',
+  });
   const secure = process.env.NODE_ENV === 'production';
   response.cookies.set(SESSION_COOKIE, rawSession, { ...cookieOptions(secure), maxAge: SESSION_MS / 1000 });
   return response;

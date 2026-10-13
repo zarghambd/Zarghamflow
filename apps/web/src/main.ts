@@ -529,5 +529,9 @@ if('serviceWorker'in navigator){
   }).catch((error:unknown)=>console.error('Service worker registration failed',error));
 }
 
-await consumeMagicLink();
-if(!new URL(location.href).searchParams.has('token'))await bootstrap();
+async function initializePlanner(): Promise<void> {
+  await consumeMagicLink();
+  if (!new URL(location.href).searchParams.has('token')) await bootstrap();
+}
+
+void initializePlanner();

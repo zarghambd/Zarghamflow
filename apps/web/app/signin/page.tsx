@@ -2,11 +2,26 @@
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
 
+async function readApiResponse(response: Response) {
+  const data = await response.json().catch(() => null) as {
+    error?: { message?: string };
+    [key: string]: unknown;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? 'The sign-in service is temporarily unavailable. Please try again.');
+  }
+  if (!data) {
+    throw new Error('The sign-in service returned an invalid response. Please try again.');
+  }
+  return data;
+}
+
 async function getCsrfToken(): Promise<string> {
   const response = await fetch('/api/auth/csrf', { credentials: 'same-origin' });
-  if (!response.ok) throw new Error('Unable to start a secure sign-in request. Refresh and try again.');
-  const data = await response.json();
-  return data.csrfToken as string;
+  const data = await readApiResponse(response);
+  if (typeof data.csrfToken !== 'string') throw new Error('Unable to start a secure sign-in request. Refresh and try again.');
+  return data.csrfToken;
 }
 
 export default function SignInPage() {
@@ -36,9 +51,8 @@ export default function SignInPage() {
           headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
           body: JSON.stringify({ token }),
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error?.message ?? 'This sign-in link is invalid or expired.');
-        window.location.replace('/admin');
+        const data = await readApiResponse(response);
+        window.location.replace(typeof data.redirect === 'string' ? data.redirect : '/planner');
       } catch (verificationError) {
         window.history.replaceState(null, '', '/signin');
         setError((verificationError as Error).message);
@@ -60,9 +74,8 @@ export default function SignInPage() {
         headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
         body: JSON.stringify({ email }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error?.message ?? 'Unable to request a sign-in link.');
-      setMessage(data.message ?? 'If the address is eligible, a sign-in link will arrive shortly.');
+      const data = await readApiResponse(response);
+      setMessage(typeof data.message === 'string' ? data.message : 'If the address is eligible, a sign-in link will arrive shortly.');
     } catch (requestError) {
       setError((requestError as Error).message);
     } finally {
@@ -73,7 +86,7 @@ export default function SignInPage() {
   return (
     <main className="page-shell signin-shell">
       <section className="card signin-panel">
-        <p className="eyebrow">ZarghamFlow / Secure access</p>
+        <p className="eyebrow">Taskora / Secure access</p>
         <h1>{mode === 'verifying' ? 'Verifying your link' : 'Sign in or create an account'}</h1>
         {mode === 'verifying' ? (
           <p className="signin-copy">Checking your one-time sign-in link…</p>

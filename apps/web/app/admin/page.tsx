@@ -114,7 +114,7 @@ export default function AdminPage() {
     <main className="page-shell admin-shell">
       <header className="admin-heading">
         <div>
-          <p className="eyebrow">ZarghamFlow / Administration</p>
+          <p className="eyebrow">Taskora / Administration</p>
           <h1>User management</h1>
         </div>
         {accessStatus === 'allowed' && <div className="admin-count"><strong>{total}</strong><span>accounts</span></div>}

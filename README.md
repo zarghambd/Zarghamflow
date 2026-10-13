@@ -51,6 +51,19 @@ Never commit `.env`. Generate secrets with a password manager or `node -e "conso
 
 ## Production Deployment
 
+### Vercel frontend with Railway API (no Docker)
+
+Vercel Functions have an ephemeral, read-only application filesystem, so they must not host this app's SQLite database. Keep the web service on Vercel and run the Fastify API as a single Railway service with a persistent volume:
+
+1. Create a Railway service from the repository with the repository root (`/`) as its root directory. `railway.json` supplies the build, start, and `/health` check commands; it uses Railpack and does not require a Dockerfile.
+2. Attach a Railway volume to the API service at `/data`. In Railway Variables set `NODE_ENV=production`, `HOST=0.0.0.0`, `DATABASE_PATH=/data/zarghamflow.sqlite`, `TRUST_PROXY=true`, `APP_URL=https://www.zargham-daily-update.website`, `ADMIN_EMAIL`, `SESSION_SECRET`, and `LOGIN_SECRET`. Use two distinct random secrets of at least 32 characters.
+3. Configure outbound email on the API service with a verified provider, such as `RESEND_API_KEY` and `RESEND_FROM`; local Mailpit is not a production mailer. Set any optional VAPID variables only if enabling Web Push.
+4. Generate a Railway public domain for the API and confirm its `/health` endpoint returns HTTP 200. Keep the API at one replica because its SQLite database is a single-file volume.
+5. In the Vercel web project's Production environment variables, set `FASTIFY_API_URL` to the Railway API origin (for example, `https://your-api.up.railway.app`, without an API path). Redeploy the Vercel web service after setting it. Add the same variable for Preview only if Preview deployments should use that API.
+6. Verify `https://www.zargham-daily-update.website/api/auth/csrf`, then request a fresh sign-in link. Set `APP_URL` to the exact public web origin so email links return to the deployed site.
+
+Do not set `DATABASE_PATH` to `/tmp` on Vercel: it is not persistent or shared between function instances. The Vercel project should deploy only the web service; the Fastify service is deployed separately on Railway.
+
 Docker Compose includes the app, Caddy TLS reverse proxy, a Mailpit service for local testing, and an optional daily backup service. Deploy on a small VPS with Docker Engine and Compose installed:
 
 1. Point an A/AAAA DNS record for your hostname to the VPS. Open inbound TCP 80/443 (and UDP 443 if using HTTP/3).

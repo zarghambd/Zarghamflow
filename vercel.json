@@ -1,23 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
-    "server": {
-      "root": "apps/server",
-      "framework": "fastify",
-      "buildCommand": "cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server"
-    },
     "web": {
       "root": "apps/web",
       "framework": "nextjs",
-      "buildCommand": "cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/web",
-      "bindings": [
-        {
-          "type": "service",
-          "service": "server",
-          "format": "url",
-          "env": "FASTIFY_API_URL"
-        }
-      ]
+      "buildCommand": "cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/web"
     }
   },
   "rewrites": [

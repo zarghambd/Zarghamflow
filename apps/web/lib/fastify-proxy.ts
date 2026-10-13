@@ -14,16 +14,20 @@ export async function proxyToFastify(request: Request, path: string[]): Promise<
     );
   }
 
-  const incomingUrl = new URL(request.url);
-  const baseUrl = serviceUrl.endsWith('/') ? serviceUrl : `${serviceUrl}/`;
-  const upstreamUrl = new URL(
-    `api/v1/${path.map((segment) => encodeURIComponent(segment)).join('/')}${incomingUrl.search}`,
-    baseUrl
-  );
-  const headers = new Headers(request.headers);
-  requestHopHeaders.forEach((header) => headers.delete(header));
-
   try {
+    const incomingUrl = new URL(request.url);
+    const baseUrl = new URL(serviceUrl);
+    if (baseUrl.protocol !== 'http:' && baseUrl.protocol !== 'https:') {
+      throw new Error('FASTIFY_API_URL must use HTTP or HTTPS.');
+    }
+    if (!baseUrl.pathname.endsWith('/')) baseUrl.pathname += '/';
+    const upstreamUrl = new URL(
+      `api/v1/${path.map((segment) => encodeURIComponent(segment)).join('/')}${incomingUrl.search}`,
+      baseUrl
+    );
+    const headers = new Headers(request.headers);
+    requestHopHeaders.forEach((header) => headers.delete(header));
+
     const method = request.method.toUpperCase();
     const body = method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer();
     const upstream = await fetch(upstreamUrl, {
@@ -50,7 +54,7 @@ export async function proxyToFastify(request: Request, path: string[]): Promise<
     });
   } catch (error) {
     console.error('Fastify service proxy failed', {
-      path: upstreamUrl.pathname,
+      path: request.url,
       error: error instanceof Error ? error.message : 'Unknown fetch error',
     });
     return NextResponse.json(

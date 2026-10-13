@@ -35,6 +35,7 @@ type BeforeInstallPromptEvent = Event & { prompt(): Promise<void>; userChoice: P
 let waitingWorker: ServiceWorker | null = null;
 
 const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
+type ApiError = Error & { status?: number; code?: string; developmentLink?: string };
 const toLocalRecord = <T extends Record<string, unknown>>(row: T): T => {
   const names: Record<string, string> = { user_id: 'userId', follow_up_date: 'followUpDate', due_date: 'dueDate', due_time: 'dueTime', meeting_id: 'meetingId', completed_at: 'completedAt', created_at: 'createdAt', updated_at: 'updatedAt', deleted_at: 'deletedAt', reminder_lead_json: 'reminderLeadMinutes', reminderLeadJson: 'reminderLeadMinutes' };
   const result: Record<string, unknown> = {};
@@ -60,11 +61,12 @@ async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
   if (options.method && !['GET', 'HEAD'].includes(options.method.toUpperCase())) headers.set('x-csrf-token', await csrf());
   const response = await fetch(url, { ...options, headers, credentials: 'same-origin' });
   if (response.status === 204) return undefined as T;
-  const data = await response.json() as T & { error?: { message?: string; code?: string } };
+  const data = await response.json() as T & { error?: { message?: string; code?: string }; developmentLink?: string };
   if (!response.ok) {
-    const error = new Error(data.error?.message ?? `Request failed (${response.status})`);
-    (error as Error & { status?: number; code?: string }).status = response.status;
-    if (data.error?.code) (error as Error & { status?: number; code?: string }).code = data.error.code;
+    const error: ApiError = new Error(data.error?.message ?? `Request failed (${response.status})`);
+    error.status = response.status;
+    if (data.error?.code) error.code = data.error.code;
+    if (typeof data.developmentLink === 'string') error.developmentLink = data.developmentLink;
     throw error;
   }
   return data;
@@ -368,8 +370,8 @@ function render(dashboardData?: Record<string, unknown>): void {
   const dialog = document.querySelector<HTMLDialogElement>('#dialog');
   if (dialog && !dialog.open) dialog.addEventListener('close', () => { document.body.style.overflow = ''; });
 }
-function renderSignIn(message = ''): void {
-  app.innerHTML = `<main class="shell"><section class="panel signin"><div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m8 17 5 5 11-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Taskora</div><h1>Sign in or create account</h1><p>Enter your email and we’ll send a one-time link to verify it and continue.</p>${message?`<div class="banner">${escapeHtml(message)}</div>`:''}<form data-form="signin"><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required><button class="btn primary" style="margin-top:10px">Email me a secure link</button></div></form></section></main>`;
+function renderSignIn(message = '', developmentLink = ''): void {
+  app.innerHTML = `<main class="shell"><section class="panel signin"><div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m8 17 5 5 11-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Taskora</div><h1>Sign in or create account</h1><p>Enter your email and we’ll send a one-time link to verify it and continue.</p>${message?`<div class="banner" role="alert">${escapeHtml(message)}</div>`:''}${developmentLink?`<p class="signin-dev-link"><a href="${escapeHtml(developmentLink)}">Continue using the local sign-in link</a></p>`:''}<form data-form="signin"><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required><button class="btn primary" style="margin-top:10px">Email me a secure link</button></div></form></section></main>`;
 }
 function adminView(): string {
   const query=state.search.trim().toLowerCase();
@@ -501,7 +503,7 @@ async function enablePush():Promise<void>{
 }
 async function handleSubmit(form:HTMLFormElement):Promise<void>{
   const kind=form.dataset.form;
-  if(kind==='signin'){const data=formData(form);await api('/api/v1/auth/signup',{method:'POST',body:JSON.stringify(data)});renderSignIn('If the address is eligible, a sign-in link will arrive shortly.');return;}
+  if(kind==='signin'){const data=formData(form);try{await api('/api/v1/auth/signup',{method:'POST',body:JSON.stringify(data)});renderSignIn('If the address is eligible, a sign-in link will arrive shortly.');}catch(error){const apiError=error as ApiError;renderSignIn(apiError.message,apiError.developmentLink??'');}return;}
   if(kind==='record'){const dialog=document.querySelector<HTMLDialogElement>('#dialog');const record=formData(form);const kind=dialog?.dataset.kind as 'meeting'|'task';const id=dialog?.dataset.id??'';if(!kind)return;await saveRecord(kind,id,record);dialog?.close();render();return;}
   if(kind==='quick'){const text=String(formData(form).text??'').trim();if(!text)return;if(!navigator.onLine){const parsed=parseQuickOffline(text);if(!parsed.title){notify('Please enter a task title.');return;}await saveRecord('task','',parsed);return;}try{await api('/api/v1/tasks/quick-add',{method:'POST',body:JSON.stringify({text})});await refreshData();notify('Task added.');}catch(error){notify((error as Error).message);}return;}
   if(kind==='prefs'){const data=formData(form);const numbers=(value:unknown)=>String(value??'').split(',').map(v=>Number(v.trim())).filter(Number.isFinite);try{const prefs=await api<{prefs:ReminderPrefs}>('/api/v1/reminder-preferences',{method:'PUT',body:JSON.stringify({taskLeadMinutes:numbers(data.taskLeadMinutes),meetingLeadMinutes:numbers(data.meetingLeadMinutes),quietStart:data.quietStart,quietEnd:data.quietEnd,emailEnabled:data.emailEnabled,pushEnabled:data.pushEnabled,overdueEnabled:data.overdueEnabled,digestEnabled:data.digestEnabled,digestTime:data.digestTime,followUpEnabled:true})});state.prefs=prefs.prefs;notify('Reminder settings saved.');render();}catch(error){notify((error as Error).message);}return;}

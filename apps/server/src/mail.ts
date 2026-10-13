@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import type { Attachment } from 'nodemailer/lib/mailer';
+import { getToken } from '@vercel/connect';
 import { config } from './config.js';
 
 const transport = config.RESEND_API_KEY
@@ -9,6 +10,27 @@ const transport = config.RESEND_API_KEY
       secure: config.SMTP_PORT === 465,
       ...(config.SMTP_USER && config.SMTP_PASS ? { auth: { user: config.SMTP_USER, pass: config.SMTP_PASS } } : {})
     });
+type MailTransport = ReturnType<typeof nodemailer.createTransport>;
+let vercelTransport: Promise<MailTransport> | undefined;
+  const usesResend = process.env.VERCEL === '1' || Boolean(config.RESEND_API_KEY);
+
+function getDeliveryTransport(): Promise<MailTransport> {
+  if (process.env.VERCEL !== '1') return Promise.resolve(transport);
+
+  vercelTransport ??= getToken('resend/zarghamflow', { subject: { type: 'app' } }).then((apiKey) =>
+    nodemailer.createTransport({
+      host: 'smtp.resend.com',
+      port: 465,
+      secure: true,
+      auth: { user: 'resend', pass: apiKey },
+    })
+  );
+
+  return vercelTransport.catch((error: unknown) => {
+    vercelTransport = undefined;
+    throw error;
+  });
+}
 
 export type TestMail = { to: string; subject: string; text: string; html?: string; attachments?: Attachment[] };
 const testMailQueue: TestMail[] = [];
@@ -23,7 +45,15 @@ export async function sendMail(to: string, subject: string, text: string, html?:
     testMailQueue.push({ to, subject, text, ...(html ? { html } : {}), ...(attachments ? { attachments } : {}) });
     return;
   }
-  await transport.sendMail({ from: config.SMTP_FROM, to, subject, text, ...(html ? { html } : {}), ...(attachments ? { attachments } : {}) });
+  const deliveryTransport = await getDeliveryTransport();
+  await deliveryTransport.sendMail({
+    from: usesResend ? config.RESEND_FROM : config.SMTP_FROM,
+    to,
+    subject,
+    text,
+    ...(html ? { html } : {}),
+    ...(attachments ? { attachments } : {})
+  });
 }
 
 export function takeTestMails(): TestMail[] {
@@ -36,5 +66,6 @@ export function failNextTestEmails(count = 1): void {
 }
 
 export async function verifyMail(): Promise<void> {
-  await transport.verify();
+  const deliveryTransport = await getDeliveryTransport();
+  await deliveryTransport.verify();
 }

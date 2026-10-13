@@ -16,6 +16,7 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().default('ZarghamFlow <no-reply@localhost>'),
   RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM: z.string().default('ZarghamFlow <onboarding@resend.dev>'),
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().default('mailto:owner@example.com'),

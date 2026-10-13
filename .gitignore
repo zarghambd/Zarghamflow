@@ -1,4 +1,5 @@
 node_modules/
+.vercel/
 **/dist/
 apps/web/.next/
 apps/web/tsconfig.tsbuildinfo

@@ -4,13 +4,11 @@
     "server": {
       "root": "apps/server",
       "framework": "fastify",
-      "installCommand": "cd ../.. && npm ci",
       "buildCommand": "cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server"
     },
     "web": {
       "root": "apps/web",
       "framework": "nextjs",
-      "installCommand": "cd ../.. && npm ci",
       "buildCommand": "cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/web",
       "bindings": [
         {

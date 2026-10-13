@@ -48,7 +48,11 @@ export async function proxyToFastify(request: Request, path: string[]): Promise<
       statusText: upstream.statusText,
       headers: responseHeaders,
     });
-  } catch {
+  } catch (error) {
+    console.error('Fastify service proxy failed', {
+      path: upstreamUrl.pathname,
+      error: error instanceof Error ? error.message : 'Unknown fetch error',
+    });
     return NextResponse.json(
       { error: { code: 'API_UNAVAILABLE', message: 'The API service is temporarily unavailable.' } },
       { status: 502 }

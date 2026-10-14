@@ -11,7 +11,7 @@ const ownerEmail = 'owner@example.test';
 const testDir = mkdtempSync(join(tmpdir(), 'zarghamflow-auth-'));
 process.env.NODE_ENV = 'test';
 process.env.OWNER_EMAIL = ownerEmail;
-process.env.APP_URL = 'http://localhost:5173';
+process.env.APP_URL = 'http://127.0.0.1:3001';
 process.env.DATABASE_PATH = join(testDir, 'auth.sqlite');
 delete process.env.DATABASE_URL;
 process.env.LOGIN_SECRET = 'auth-test-login-secret-0123456789abcdef';
@@ -106,6 +106,7 @@ describe('single-owner email authentication', () => {
     expect(requested.statusCode).toBe(200);
     const [message] = takeTestMails();
     expect(message).toBeDefined();
+    expect(message!.text).toContain('http://127.0.0.1:3001/signin?token=');
     const token = /[?&]token=([A-Za-z0-9_-]+)/.exec(message!.text)?.[1];
     expect(token).toBeDefined();
 

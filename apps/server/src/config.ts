@@ -12,7 +12,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url().optional(),
   OWNER_EMAIL: z.string().email().optional(),
   ADMIN_EMAIL: z.string().email().optional(),
-  APP_URL: z.string().url().default('http://localhost:5173'),
+  APP_URL: z.string().url().default('http://127.0.0.1:3001'),
   LOGIN_SECRET: z.string().min(32),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(1025),
@@ -38,6 +38,10 @@ export function parseConfig(env: NodeJS.ProcessEnv) {
     if (Boolean(parsed.SMTP_USER) !== Boolean(parsed.SMTP_PASS)) missing.push('SMTP_USER and SMTP_PASS must be configured together');
     if (missing.length) {
       throw new Error(`Invalid Vercel production configuration: ${missing.join(', ')}.`);
+    }
+    const appUrl = new URL(parsed.APP_URL);
+    if (appUrl.protocol !== 'https:' || appUrl.pathname !== '/' || appUrl.search || appUrl.hash) {
+      throw new Error('APP_URL must be the HTTPS origin of the production app, without a path, query, or fragment.');
     }
   }
   return parsed;

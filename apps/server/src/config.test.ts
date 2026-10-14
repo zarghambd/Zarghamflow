@@ -28,6 +28,13 @@ describe('Vercel production configuration', () => {
     expect(() => parseConfig({ ...validVercelEnvironment, APP_URL: undefined })).toThrow('APP_URL');
   });
 
+  it.each(['http://taskora.example', 'https://taskora.example/signin', 'https://taskora.example/?token=bad'])(
+    'rejects a non-origin production APP_URL: %s',
+    (APP_URL) => {
+      expect(() => parseConfig({ ...validVercelEnvironment, APP_URL })).toThrow('APP_URL must be the HTTPS origin');
+    }
+  );
+
   it('rejects missing email provider configuration', () => {
     expect(() => parseConfig({
       ...validVercelEnvironment,
@@ -45,5 +52,12 @@ describe('Vercel production configuration', () => {
       SMTP_USER: 'mailer',
       SMTP_PASS: undefined
     })).toThrow('SMTP_USER and SMTP_PASS must be configured together');
+  });
+
+  it('defaults local development to the Next.js dev server origin', () => {
+    expect(parseConfig({
+      NODE_ENV: 'development',
+      LOGIN_SECRET: 'local-development-login-secret-0123456789'
+    }).APP_URL).toBe('http://127.0.0.1:3001');
   });
 });

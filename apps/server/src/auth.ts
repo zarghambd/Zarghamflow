@@ -40,17 +40,19 @@ export function registerAuth(app: ApiApp): void {
     if (Number(recentByIp?.count ?? 0) >= 5 || Number(recentByAccount?.count ?? 0) >= 5 || existing?.active === 0) return reply.send(generic);
 
     const now = new Date();
+    const loginTokenId = randomUUID();
     const rawToken = randomToken(32);
     const tokenHash = sha256(rawToken);
     await dbRun('DELETE FROM login_tokens WHERE expires_at < ? OR consumed_at IS NOT NULL', [iso(now)]);
     await dbRun('INSERT INTO login_tokens (id,email,token_hash,kind,expires_at,created_at,ip_hash) VALUES (?,?,?,?,?,?,?)',
-      [randomUUID(), email, tokenHash, 'magic_link', iso(new Date(now.getTime() + TEN_MINUTES)), iso(now), ip]);
+      [loginTokenId, email, tokenHash, 'magic_link', iso(new Date(now.getTime() + TEN_MINUTES)), iso(now), ip]);
     const url = new URL('/signin', config.APP_URL);
     url.searchParams.set('token', rawToken);
     try {
       await sendMail(email, 'Your ZarghamFlow sign-in link', `Use this one-time link within 10 minutes to sign in or finish creating your account:\n\n${url.toString()}\n\nIf you did not request it, ignore this message.`,
         `<p>Use this one-time link within 10 minutes to sign in or finish creating your account:</p><p><a href="${url.toString()}">Continue to ZarghamFlow</a></p><p>If you did not request it, ignore this message.</p>`);
     } catch (error) {
+      await dbRun('DELETE FROM login_tokens WHERE id=?', [loginTokenId]);
       if (config.NODE_ENV !== 'development') throw error;
       request.log.error({ err: error }, 'Magic-link email delivery failed; returning a local development link');
       return reply.code(503).send({

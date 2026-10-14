@@ -14,7 +14,6 @@ process.env.OWNER_EMAIL = ownerEmail;
 process.env.APP_URL = 'http://localhost:5173';
 process.env.DATABASE_PATH = join(testDir, 'auth.sqlite');
 delete process.env.DATABASE_URL;
-process.env.SESSION_SECRET = 'auth-test-session-secret-0123456789abcdef';
 process.env.LOGIN_SECRET = 'auth-test-login-secret-0123456789abcdef';
 
 let app: ApiTestApp;
@@ -91,6 +90,35 @@ beforeEach(() => {
 });
 
 describe('single-owner email authentication', () => {
+  it('serves the same-origin Next.js auth paths', async () => {
+    const csrfResponse = await app.inject({ method: 'GET', url: '/api/auth/csrf' });
+    expect(csrfResponse.statusCode).toBe(200);
+    const csrfToken = (csrfResponse.json() as { csrfToken: string }).csrfToken;
+    const csrfCookie = setCookies(csrfResponse).find((value) => value.startsWith('zf_csrf='));
+    expect(csrfCookie).toBeDefined();
+
+    const requested = await app.inject({
+      method: 'POST',
+      url: '/api/auth/request',
+      headers: { cookie: csrfCookie!, 'x-csrf-token': csrfToken },
+      payload: { email: ownerEmail }
+    });
+    expect(requested.statusCode).toBe(200);
+    const [message] = takeTestMails();
+    expect(message).toBeDefined();
+    const token = /[?&]token=([A-Za-z0-9_-]+)/.exec(message!.text)?.[1];
+    expect(token).toBeDefined();
+
+    const verified = await app.inject({
+      method: 'POST',
+      url: '/api/auth/verify',
+      headers: { cookie: csrfCookie!, 'x-csrf-token': csrfToken },
+      payload: { token }
+    });
+    expect(verified.statusCode).toBe(200);
+    expect((verified.json() as { redirect: string }).redirect).toBe('/admin');
+  });
+
   it('returns the same generic response for any signup address', async () => {
     const pair = await csrf();
     const wrong = await requestLink('other@example.test', pair);
@@ -129,6 +157,7 @@ describe('single-owner email authentication', () => {
 
   it('rejects an expired link and keeps other device sessions active', async () => {
     const pair = await csrf();
+    expect((await verifyToken('invalid-token', pair)).statusCode).toBe(400);
     const expiredToken = await issueOwnerToken(pair);
     sqlite.prepare('UPDATE login_tokens SET expires_at=? WHERE token_hash=?').run(new Date(Date.now() - 1000).toISOString(), createHash('sha256').update(expiredToken).digest('hex'));
     expect((await verifyToken(expiredToken, pair)).statusCode).toBe(400);
@@ -140,6 +169,18 @@ describe('single-owner email authentication', () => {
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
     expect((sqlite.prepare('SELECT COUNT(*) AS count FROM sessions WHERE revoked_at IS NULL').get() as { count: number }).count).toBe(2);
+  });
+
+  it('surfaces email delivery failures and removes the unusable login token', async () => {
+    const pair = await csrf();
+    failNextTestEmails();
+
+    const response = await requestLink(ownerEmail, pair);
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred.' } });
+    expect((sqlite.prepare('SELECT COUNT(*) AS count FROM login_tokens WHERE email=?').get(ownerEmail) as { count: number }).count).toBe(0);
+    expect(takeTestMails()).toHaveLength(0);
   });
 
   it('limits magic-link sends per owner account while keeping the generic response', async () => {

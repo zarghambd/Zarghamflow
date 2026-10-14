@@ -17,7 +17,7 @@ ZarghamFlow is a multi-user meeting and task planner with email-verified signup 
 
 Prerequisites: Node.js 20+ (Node 22 recommended) and npm.
 
-1. Copy `.env.example` to `.env` and set `ADMIN_EMAIL`, `SESSION_SECRET`, and `LOGIN_SECRET`. Make both secrets independently random and at least 32 characters. Anyone can create an account by verifying their email; only the designated admin address receives administrator privileges automatically.
+1. Copy `.env.example` to `.env` and set `ADMIN_EMAIL` and a random `LOGIN_SECRET` of at least 32 characters. Anyone can create an account by verifying their email; only the designated admin address receives administrator privileges automatically.
 2. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` for a mail provider. For local development, if mail delivery is unavailable, development mode displays a one-time sign-in link instead.
 3. Run `npm ci`.
 4. Run `npm run dev`. The app and API are both available at `http://127.0.0.1:3001`; health is at `/api/health`.
@@ -36,8 +36,7 @@ Database migrations are applied when the API is first used. For explicit migrati
 | `ADMIN_EMAIL` | Designated initial administrator email; if unset, the first verified account becomes admin | Optional but recommended |
 | `OWNER_EMAIL` | Legacy compatibility email; no longer restricts signup | Optional |
 | `APP_URL` | Public app origin for sign-in/action links | `http://127.0.0.1:3001` |
-| `SESSION_SECRET` | Session-related secret material | Required, 32+ random chars |
-| `LOGIN_SECRET` | IP hashing/auth secret material | Required, different 32+ chars |
+| `LOGIN_SECRET` | HMAC key used to hash client IPs for authentication/rate-limiting records | Required, 32+ random chars |
 | `CRON_SECRET` | Bearer token protecting scheduled reminder processing | Required when enabling reminders on Vercel |
 | `SMTP_HOST`, `SMTP_PORT` | SMTP endpoint | `127.0.0.1`, `1025` locally; `smtp.gmail.com`, `465` for Google Workspace |
 | `SMTP_USER`, `SMTP_PASS` | SMTP account and app password | Optional locally; Google Workspace requires an App Password |
@@ -48,17 +47,24 @@ Database migrations are applied when the API is first used. For explicit migrati
 | `TRUST_PROXY` | Trust reverse-proxy headers | `false`; set `true` behind Caddy |
 | `RATE_LIMIT_MAX` | General API requests per minute/IP | `60` |
 
-Never commit `.env`. Generate secrets with a password manager or `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Rotate them by changing values, restarting, and invalidating active sessions when rotating `SESSION_SECRET` (sessions are stored as hashes; revoke all from Settings before rotation).
+Never commit `.env`. Generate secrets with a password manager or `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Session cookies contain high-entropy random tokens and only their hashes are stored in the database; revoke sessions from Settings if an active session token may have been exposed.
 
 ## Production Deployment
 
 ### Vercel with Neon
 
-Use one Vercel project for the Next.js app and its API routes. Set the Vercel project's **Root Directory** to `apps/web`. The included `apps/web/vercel.json` builds the shared package and web app from the repository root. Neon supplies the persistent PostgreSQL database; do not use SQLite or `DATABASE_PATH` on Vercel.
+Use one Vercel project for the Next.js app and its API routes. Set the **Framework Preset** to **Next.js** and the **Root Directory** to `apps/web`; enable **Include source files outside of the Root Directory in the Build Step** because the build imports the server and shared workspaces. The included `apps/web/vercel.json` builds the shared package, server package, and web app from the repository root. The auth UI calls same-origin `/api/auth/...` Route Handlers, which dispatch directly to the in-process API; there is no external API URL or Vercel service binding. Neon supplies the persistent PostgreSQL database; do not use SQLite or `DATABASE_PATH` on Vercel.
 
 1. Create a Neon project and copy its pooled PostgreSQL connection string. Keep it private; do not paste it into source control or chat.
-2. In the Vercel project, select Node.js 22 and set Production environment variables: `NODE_ENV=production`, `DATABASE_URL` (the Neon pooled connection string), `APP_URL` (the exact public web origin), `ADMIN_EMAIL`, `TRUST_PROXY=true`, distinct random values for `SESSION_SECRET` and `LOGIN_SECRET` (at least 32 characters each), and a random `CRON_SECRET`. Do not set `DATABASE_PATH`, `HOST`, or `PORT`.
-3. Configure email using either Resend (`RESEND_API_KEY` and `RESEND_FROM`) or SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`). Use a newly generated provider app password and a sender address authorized by that provider.
+2. In the Vercel project, select Node.js 22 and set Production environment variables:
+   - `DATABASE_URL`: the Neon pooled PostgreSQL connection string.
+   - `APP_URL`: the exact public HTTPS origin used for magic-link callback URLs, for example `https://www.example.com`.
+   - `LOGIN_SECRET`: a random value of at least 32 characters.
+   - Email delivery: either `RESEND_API_KEY` and `RESEND_FROM`, or `SMTP_HOST` and `SMTP_PORT`, with `SMTP_USER` and `SMTP_PASS` both set when the provider requires authentication; set `SMTP_FROM` to an authorized sender address.
+   - `ADMIN_EMAIL` is optional and selects the designated initial administrator. `CRON_SECRET` is needed only for scheduled reminder processing. `TRUST_PROXY` can be set to `true` when proxy-derived client IPs are desired.
+
+   Vercel provides `VERCEL=1`; the server validates the required database, callback origin, secrets, and email provider configuration in production. Do not set `DATABASE_PATH`, `HOST`, or `PORT`. Do not put credentials in `NEXT_PUBLIC_*` variables.
+3. Configure email using either Resend or SMTP as described above. Use a newly generated provider app password and a sender address authorized by that provider.
 4. Deploy the project. The first API request applies the PostgreSQL schema migrations automatically. Verify `/api/health`, then request a new sign-in link from the public app. The included Vercel Cron calls `/api/cron/reminders` every minute and authenticates using `CRON_SECRET`; the deployment plan must support minute-level cron jobs.
 5. Add Preview variables only if Preview deployments should connect to a database. Do not point Preview at Production unless intentional.
 
@@ -69,7 +75,7 @@ The Docker Compose/Caddy instructions below are only for self-hosting on a VPS; 
 Docker Compose includes the app, Caddy TLS reverse proxy, and an optional daily backup service. Deploy on a small VPS with Docker Engine and Compose installed:
 
 1. Point an A/AAAA DNS record for your hostname to the VPS. Open inbound TCP 80/443 (and UDP 443 if using HTTP/3).
-2. Copy `.env.example` to `.env`; set `NODE_ENV=production`, `ADMIN_EMAIL`, two strong secrets, and `PUBLIC_DOMAIN`. Configure Resend by setting `RESEND_API_KEY` and a verified `SMTP_FROM` domain/address. Alternatively configure an SMTP provider with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`.
+2. Copy `.env.example` to `.env`; set `NODE_ENV=production`, `ADMIN_EMAIL`, a strong `LOGIN_SECRET`, and `PUBLIC_DOMAIN`. Configure Resend by setting `RESEND_API_KEY` and a verified `SMTP_FROM` domain/address. Alternatively configure an SMTP provider with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`.
 3. Verify the sender domain with your email provider and publish its SPF and DKIM DNS records (and DMARC policy). The app does not configure DNS for you.
 4. Start with `docker compose up -d --build`. Caddy obtains and renews HTTPS certificates. The app listens only on the Compose network; persist the `zarghamflow-data` volume.
 5. Enable daily backups with `docker compose --profile backup up -d backup`. Backups are retained for 14 days in `zarghamflow-backups`; also copy encrypted backups off-host.

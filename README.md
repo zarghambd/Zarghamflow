@@ -38,9 +38,9 @@ The database migration is applied automatically by the API on startup. For expli
 | `APP_URL` | Public app origin for sign-in/action links | `http://localhost:5173` |
 | `SESSION_SECRET` | Session-related secret material | Required, 32+ random chars |
 | `LOGIN_SECRET` | IP hashing/auth secret material | Required, different 32+ chars |
-| `SMTP_HOST`, `SMTP_PORT` | SMTP endpoint | `127.0.0.1`, `1025` |
-| `SMTP_USER`, `SMTP_PASS` | Optional SMTP credentials | Optional |
-| `SMTP_FROM` | From identity | `ZarghamFlow <no-reply@localhost>` |
+| `SMTP_HOST`, `SMTP_PORT` | SMTP endpoint | `127.0.0.1`, `1025` locally; `smtp.gmail.com`, `465` for Google Workspace |
+| `SMTP_USER`, `SMTP_PASS` | SMTP account and app password | Optional locally; Google Workspace requires an App Password |
+| `SMTP_FROM` | From identity; use the authenticated address for Google Workspace | `ZarghamFlow <no-reply@localhost>` locally |
 | `RESEND_API_KEY`, `RESEND_FROM` | Use Resend SMTP instead of `SMTP_*` | Optional; API key and verified sender from Resend |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web Push credentials | Optional until push enabled |
 | `VAPID_SUBJECT` | VAPID contact identity | `mailto:you@example.com` |
@@ -58,7 +58,7 @@ Use two Vercel projects from this repository: a Next.js web project and a Fastif
 
 1. Create a Neon project and copy its pooled PostgreSQL connection string. Keep it private; do not paste it into source control or chat.
 2. Create a Vercel API project from this repository and set its Root Directory to `apps/server`. Use Node.js 22. If Vercel does not build the workspace package automatically, set the build command to `cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server`.
-3. In the API project's Production environment, set `NODE_ENV=production`, `HOST=0.0.0.0`, `DATABASE_URL` to the Neon pooled connection string, `TRUST_PROXY=true`, `APP_URL` to the public web origin, `ADMIN_EMAIL`, and separate random values for `SESSION_SECRET` and `LOGIN_SECRET` (at least 32 characters each). Configure email using a verified sender with `RESEND_API_KEY` and `RESEND_FROM`. Do not set `DATABASE_PATH`.
+3. In the API project's Production environment, set `NODE_ENV=production`, `HOST=0.0.0.0`, `DATABASE_URL` to the Neon pooled connection string, `TRUST_PROXY=true`, `APP_URL` to the public web origin, `ADMIN_EMAIL`, and separate random values for `SESSION_SECRET` and `LOGIN_SECRET` (at least 32 characters each). For email, either configure Resend with `RESEND_API_KEY` and `RESEND_FROM`, or use Google SMTP with `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_USER` and `SMTP_FROM` set to the Google account, and a newly generated Google App Password in `SMTP_PASS`. When using Google SMTP, remove `RESEND_API_KEY` from the API project's environment. Do not set `DATABASE_PATH`.
 4. Deploy the API project and verify its `/health` URL returns HTTP 200. API startup applies the PostgreSQL schema migrations automatically.
 5. Keep the web project configured with the repository root and existing `vercel.json` web service. Set its Production `FASTIFY_API_URL` to the API project's origin only (for example, `https://your-api.vercel.app`, with no `/api` suffix), then redeploy the web project.
 6. Verify the web project's `/api/auth/csrf` returns a CSRF token, then request a new sign-in link. Email sign-in links use the API project's `APP_URL`; set it to the exact public web origin.

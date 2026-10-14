@@ -12,10 +12,14 @@ const transport = config.RESEND_API_KEY
     });
 type MailTransport = ReturnType<typeof nodemailer.createTransport>;
 let vercelTransport: Promise<MailTransport> | undefined;
-const usesResend = process.env.VERCEL === '1' || Boolean(config.RESEND_API_KEY);
+const hasConfiguredSmtp = Boolean(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASS);
+const usesResend = Boolean(config.RESEND_API_KEY) || (process.env.VERCEL === '1' && !hasConfiguredSmtp);
 
 function getDeliveryTransport(): Promise<MailTransport> {
-  if (config.RESEND_API_KEY) return Promise.resolve(transport);
+  if (!config.RESEND_API_KEY && Boolean(config.SMTP_USER) !== Boolean(config.SMTP_PASS)) {
+    return Promise.reject(new Error('SMTP_USER and SMTP_PASS must both be configured for authenticated SMTP.'));
+  }
+  if (config.RESEND_API_KEY || hasConfiguredSmtp) return Promise.resolve(transport);
   if (process.env.VERCEL !== '1') return Promise.resolve(transport);
 
   vercelTransport ??= getToken('resend/zarghamflow', { subject: { type: 'app' } }).then((apiKey) =>

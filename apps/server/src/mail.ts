@@ -1,6 +1,5 @@
 import nodemailer from 'nodemailer';
 import type { Attachment } from 'nodemailer/lib/mailer';
-import { getToken } from '@vercel/connect';
 import { config } from './config.js';
 
 const transport = config.RESEND_API_KEY
@@ -11,30 +10,15 @@ const transport = config.RESEND_API_KEY
       ...(config.SMTP_USER && config.SMTP_PASS ? { auth: { user: config.SMTP_USER, pass: config.SMTP_PASS } } : {})
     });
 type MailTransport = ReturnType<typeof nodemailer.createTransport>;
-let vercelTransport: Promise<MailTransport> | undefined;
-const hasConfiguredSmtp = Boolean(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASS);
-const usesResend = Boolean(config.RESEND_API_KEY) || (process.env.VERCEL === '1' && !hasConfiguredSmtp);
+const usesResend = Boolean(config.RESEND_API_KEY);
 
 function getDeliveryTransport(): Promise<MailTransport> {
   if (!config.RESEND_API_KEY && Boolean(config.SMTP_USER) !== Boolean(config.SMTP_PASS)) {
     return Promise.reject(new Error('SMTP_USER and SMTP_PASS must both be configured for authenticated SMTP.'));
   }
-  if (config.RESEND_API_KEY || hasConfiguredSmtp) return Promise.resolve(transport);
+  if (config.RESEND_API_KEY || config.SMTP_HOST) return Promise.resolve(transport);
   if (process.env.VERCEL !== '1') return Promise.resolve(transport);
-
-  vercelTransport ??= getToken('resend/zarghamflow', { subject: { type: 'app' } }).then((apiKey) =>
-    nodemailer.createTransport({
-      host: 'smtp.resend.com',
-      port: 465,
-      secure: true,
-      auth: { user: 'resend', pass: apiKey },
-    })
-  );
-
-  return vercelTransport.catch((error: unknown) => {
-    vercelTransport = undefined;
-    throw error;
-  });
+  return Promise.reject(new Error('Email delivery is not configured. Set RESEND_API_KEY or the SMTP environment variables.'));
 }
 
 export type TestMail = { to: string; subject: string; text: string; html?: string; attachments?: Attachment[] };

@@ -61,15 +61,28 @@ async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
   if (options.method && !['GET', 'HEAD'].includes(options.method.toUpperCase())) headers.set('x-csrf-token', await csrf());
   const response = await fetch(url, { ...options, headers, credentials: 'same-origin' });
   if (response.status === 204) return undefined as T;
-  const data = await response.json() as T & { error?: { message?: string; code?: string }; developmentLink?: string };
+  const text = await response.text();
+  let data: unknown;
+  if (text) {
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      data = undefined;
+    }
+  }
+  const payload = typeof data === 'object' && data !== null
+    ? data as { error?: { message?: string; code?: string }; developmentLink?: unknown }
+    : undefined;
   if (!response.ok) {
-    const error: ApiError = new Error(data.error?.message ?? `Request failed (${response.status})`);
+    const message = payload?.error?.message ?? (text && data === undefined ? text : `Request failed (${response.status})`);
+    const error: ApiError = new Error(message);
     error.status = response.status;
-    if (data.error?.code) error.code = data.error.code;
-    if (typeof data.developmentLink === 'string') error.developmentLink = data.developmentLink;
+    if (payload?.error?.code) error.code = payload.error.code;
+    if (typeof payload?.developmentLink === 'string') error.developmentLink = payload.developmentLink;
     throw error;
   }
-  return data;
+  if (data === undefined) throw new Error(`Invalid server response (${response.status}).`);
+  return data as T;
 }
 
 async function cacheRecords(): Promise<void> {

@@ -27,7 +27,7 @@ if (!isPostgres) {
 
 export { isPostgres };
 
-export const sqlite = new Proxy({} as SqliteDatabase, {
+export const sqlite: SqliteDatabase = new Proxy({} as SqliteDatabase, {
   get(_target, property) {
     if (!sqliteInstance) {
       throw new Error('The SQLite connection is unavailable when DATABASE_URL is configured.');

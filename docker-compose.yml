@@ -8,8 +8,6 @@ services:
       PORT: 3000
       DATABASE_PATH: /data/zarghamflow.sqlite
       APP_URL: https://${PUBLIC_DOMAIN:-localhost}
-      SMTP_HOST: ${SMTP_HOST:-mailpit}
-      SMTP_PORT: ${SMTP_PORT:-1025}
       TRUST_PROXY: "true"
     volumes:
       - zarghamflow-data:/data
@@ -17,7 +15,7 @@ services:
     expose:
       - "3000"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -39,14 +37,6 @@ services:
       app:
         condition: service_healthy
 
-  mailpit:
-    image: axllent/mailpit:v1.27
-    restart: unless-stopped
-    profiles: ["local-mail"]
-    ports:
-      - "127.0.0.1:8025:8025"
-      - "127.0.0.1:1025:1025"
-
   backup:
     build: .
     restart: unless-stopped
@@ -57,6 +47,7 @@ services:
     volumes:
       - zarghamflow-data:/data:ro
       - zarghamflow-backups:/app/apps/server/backups
+    working_dir: /app/apps/server
     entrypoint: ["sh", "-c", "while true; do node dist/backup.js; sleep 86400; done"]
     depends_on:
       app:

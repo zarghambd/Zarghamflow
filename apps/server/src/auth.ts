@@ -1,10 +1,10 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { randomUUID } from 'node:crypto';
 import { loginRequestSchema, loginVerifySchema } from '@zarghamflow/shared';
 import { config } from './config.js';
 import { dbAll, dbGet, dbRun, dbTransaction } from './db/index.js';
 import { sendMail } from './mail.js';
 import { hashIp, randomToken, safeEqual, sha256 } from './security.js';
+import type { ApiApp, ApiReply, ApiRequest } from './http-types.js';
 
 const SESSION_COOKIE = 'zf_session';
 const CSRF_COOKIE = 'zf_csrf';
@@ -19,7 +19,7 @@ function cookieOptions(secure: boolean) {
   return { path: '/', httpOnly: true, secure, sameSite: 'lax' as const };
 }
 
-export function registerAuth(app: FastifyInstance): void {
+export function registerAuth(app: ApiApp): void {
   const secure = config.NODE_ENV === 'production';
 
   app.get('/api/v1/auth/csrf', async (_request, reply) => {
@@ -28,7 +28,7 @@ export function registerAuth(app: FastifyInstance): void {
     return { csrfToken: token };
   });
 
-  const requestLink = async (request: FastifyRequest, reply: FastifyReply) => {
+  const requestLink = async (request: ApiRequest, reply: ApiReply) => {
     const parsed = loginRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(200).send({ ok: true, message: 'If the address is eligible, a sign-in link will arrive shortly.' });
     const email = parsed.data.email.trim().toLowerCase();
@@ -174,6 +174,6 @@ export function registerAuth(app: FastifyInstance): void {
   });
 }
 
-export function addCsrfHeaders(request: FastifyRequest, reply: FastifyReply): void {
+export function addCsrfHeaders(request: ApiRequest, reply: ApiReply): void {
   if (request.csrfToken) reply.header('x-csrf-token', request.csrfToken);
 }

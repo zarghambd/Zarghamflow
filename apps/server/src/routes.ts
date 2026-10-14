@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   importSchema, meetingInputSchema, paginationSchema, reminderPrefsSchema, taskInputSchema
 } from '@zarghamflow/shared';
@@ -10,14 +9,15 @@ import { schedulerHeartbeat, scheduleEntityReminders } from './reminders/schedul
 import { config } from './config.js';
 import { hashIp, randomToken, sha256 } from './security.js';
 import { sendMail } from './mail.js';
+import type { ApiApp, ApiRequest } from './http-types.js';
 
 const nowIso = (): string => new Date().toISOString();
 const failure = (code: string, message: string) => ({ error: { code, message } });
-function owner(request: FastifyRequest): { id: string; email: string; role: 'admin'|'user' } {
+function owner(request: ApiRequest): { id: string; email: string; role: 'admin'|'user' } {
   if (!request.owner) throw Object.assign(new Error('Sign in required.'), { statusCode: 401, code: 'UNAUTHORIZED' });
   return request.owner;
 }
-function admin(request: FastifyRequest): { id: string; email: string; role: 'admin'|'user' } {
+function admin(request: ApiRequest): { id: string; email: string; role: 'admin'|'user' } {
   const user = owner(request);
   if (user.role !== 'admin') throw Object.assign(new Error('Administrator access required.'), { statusCode: 403, code: 'FORBIDDEN' });
   return user;
@@ -78,7 +78,7 @@ function parseOldTask(value: unknown, meetingIds: Map<string, string>): Record<s
   return parsed.success ? parsed.data as Record<string, unknown> : null;
 }
 
-export async function registerRoutes(app: FastifyInstance): Promise<void> {
+export async function registerRoutes(app: ApiApp): Promise<void> {
   app.get('/api/v1/admin/users', async (request, reply) => {
     const actor = admin(request);
     const query = request.query as {q?:string; role?:string; active?:string};

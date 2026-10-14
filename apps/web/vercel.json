@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd ../.. && npm ci --no-audit --no-fund",
+  "buildCommand": "cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server && npm run build --workspace @zarghamflow/web",
+  "crons": [
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "* * * * *"
+    }
+  ]
+}

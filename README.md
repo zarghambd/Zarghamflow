@@ -1,43 +1,44 @@
 # ZarghamFlow
 
-ZarghamFlow is a multi-user meeting and task planner with email-verified signup and administrator-managed accounts. The production app is a Fastify/TypeScript service with Neon/PostgreSQL, a Vite TypeScript PWA, email magic links, server-side reminders, Web Push, and an offline IndexedDB outbox. SQLite remains the local-development database. The original `index.html` remains in the repository as the legacy app and localStorage backup reference.
+ZarghamFlow is a multi-user meeting and task planner with email-verified signup and administrator-managed accounts. The production app is a Next.js application with API route handlers, Neon/PostgreSQL, email magic links, reminders, Web Push, and an offline IndexedDB outbox. SQLite remains available for local development. The original `index.html` remains in the repository as the legacy app and localStorage backup reference.
 
-**Stack choice:** Node 22, Fastify, Zod, SQLite for local development, Neon/PostgreSQL for Vercel, Vite/vanilla TypeScript, Nodemailer/Resend SMTP, and Web Push.
+**Stack choice:** Node 22, Next.js, Zod, SQLite for local development, Neon/PostgreSQL for Vercel, Nodemailer/Resend SMTP, and Web Push.
 
 ## Structure
 
-- `apps/server`: Fastify API, auth, SQLite access, reminder scheduler, and backup/seed tools.
+- `apps/server`: API handlers, auth, database access, reminder scheduler, and backup/seed tools. The API handlers run inside the Next.js application; this package is not a separately deployed service.
 - `apps/server/migrations`: versioned SQL migrations.
-- `apps/web`: PWA client, static shell, IndexedDB cache/outbox, and service worker.
+- `apps/web`: Next.js application, PWA client, IndexedDB cache/outbox, service worker, and API route handlers.
 - `packages/shared`: shared TypeScript types and Zod validation schemas.
-- `openapi.yaml`: versioned REST contract. Fastify Swagger UI is available at `/docs`.
+- `openapi.yaml`: versioned REST contract; API schema JSON is available at `/api/v1/openapi.json`.
 - `index.html`, `Code.gs`: preserved legacy application and old Google Apps Script companion.
 
 ## Local Development
 
-Prerequisites: Node.js 20+ (Node 22 recommended) and npm. Docker is optional for the Node app; it is used for Mailpit and Compose deployments.
+Prerequisites: Node.js 20+ (Node 22 recommended) and npm.
 
 1. Copy `.env.example` to `.env` and set `ADMIN_EMAIL`, `SESSION_SECRET`, and `LOGIN_SECRET`. Make both secrets independently random and at least 32 characters. Anyone can create an account by verifying their email; only the designated admin address receives administrator privileges automatically.
-2. For local email testing, run `docker compose --profile local-mail up mailpit`; use `SMTP_HOST=127.0.0.1` in `.env`. Mailpit UI is at `http://localhost:8025`. Without Docker, point SMTP settings at a development SMTP relay; if mail delivery is unavailable, development mode displays a one-time local sign-in link instead.
-3. Run `npm install`, then `npm install-scripts approve better-sqlite3 esbuild` and `npm rebuild better-sqlite3 esbuild` if npm 11 reports lifecycle scripts blocked.
-4. Run `npm run dev`. The web app is at `http://127.0.0.1:3001`, API at `http://127.0.0.1:3000`, OpenAPI docs at `http://127.0.0.1:3000/docs`, and health at `/health`.
+2. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` for a mail provider. For local development, if mail delivery is unavailable, development mode displays a one-time sign-in link instead.
+3. Run `npm ci`.
+4. Run `npm run dev`. The app and API are both available at `http://127.0.0.1:3001`; health is at `/api/health`.
 5. Open the app, enter an email address, and follow the emailed verification link. The first verified user becomes admin if `ADMIN_EMAIL` is unset; otherwise the matching `ADMIN_EMAIL` user becomes admin. Admins can manage roles and disable accounts from the **Users** tab.
 
-The database migration is applied automatically by the API on startup. For explicit migration, run `npm run db:migrate`. Use `npm run db:seed` only in development/test mode to add sample records.
+Database migrations are applied when the API is first used. For explicit migration, run `npm run db:migrate`. Use `npm run db:seed` only in development/test mode to add sample records.
 
 ## Environment Variables
 
 | Variable | Purpose | Default/example |
 |---|---|---|
 | `NODE_ENV` | Runtime mode | `development` |
-| `HOST` / `PORT` | API bind address | `127.0.0.1` / `3000` |
+| `HOST` / `PORT` | Legacy standalone server bind settings (not used by Next.js) | `127.0.0.1` / `3000` |
 | `DATABASE_PATH` | SQLite file location | `./data/zarghamflow.sqlite` |
 | `DATABASE_URL` | PostgreSQL connection URL for Neon deployments | Unset for local SQLite |
 | `ADMIN_EMAIL` | Designated initial administrator email; if unset, the first verified account becomes admin | Optional but recommended |
 | `OWNER_EMAIL` | Legacy compatibility email; no longer restricts signup | Optional |
-| `APP_URL` | Public app origin for sign-in/action links | `http://localhost:5173` |
+| `APP_URL` | Public app origin for sign-in/action links | `http://127.0.0.1:3001` |
 | `SESSION_SECRET` | Session-related secret material | Required, 32+ random chars |
 | `LOGIN_SECRET` | IP hashing/auth secret material | Required, different 32+ chars |
+| `CRON_SECRET` | Bearer token protecting scheduled reminder processing | Required when enabling reminders on Vercel |
 | `SMTP_HOST`, `SMTP_PORT` | SMTP endpoint | `127.0.0.1`, `1025` locally; `smtp.gmail.com`, `465` for Google Workspace |
 | `SMTP_USER`, `SMTP_PASS` | SMTP account and app password | Optional locally; Google Workspace requires an App Password |
 | `SMTP_FROM` | From identity; use the authenticated address for Google Workspace | `ZarghamFlow <no-reply@localhost>` locally |
@@ -46,36 +47,33 @@ The database migration is applied automatically by the API on startup. For expli
 | `VAPID_SUBJECT` | VAPID contact identity | `mailto:you@example.com` |
 | `TRUST_PROXY` | Trust reverse-proxy headers | `false`; set `true` behind Caddy |
 | `RATE_LIMIT_MAX` | General API requests per minute/IP | `60` |
-| `PUBLIC_DOMAIN` | HTTPS hostname for Compose/Caddy | Required for a public server |
 
 Never commit `.env`. Generate secrets with a password manager or `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Rotate them by changing values, restarting, and invalidating active sessions when rotating `SESSION_SECRET` (sessions are stored as hashes; revoke all from Settings before rotation).
 
 ## Production Deployment
 
-### Vercel web and API with Neon
+### Vercel with Neon
 
-Use two Vercel projects from this repository: a Next.js web project and a Fastify API project. Neon supplies the persistent PostgreSQL database; do not use SQLite or `DATABASE_PATH` for the Vercel API.
+Use one Vercel project for the Next.js app and its API routes. Set the Vercel project's **Root Directory** to `apps/web`. The included `apps/web/vercel.json` builds the shared package and web app from the repository root. Neon supplies the persistent PostgreSQL database; do not use SQLite or `DATABASE_PATH` on Vercel.
 
 1. Create a Neon project and copy its pooled PostgreSQL connection string. Keep it private; do not paste it into source control or chat.
-2. Create a Vercel API project from this repository and set its Root Directory to `apps/server`. Use Node.js 22. If Vercel does not build the workspace package automatically, set the build command to `cd ../.. && npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server`.
-3. In the API project's Production environment, set `NODE_ENV=production`, `HOST=0.0.0.0`, `DATABASE_URL` to the Neon pooled connection string, `TRUST_PROXY=true`, `APP_URL` to the public web origin, `ADMIN_EMAIL`, and separate random values for `SESSION_SECRET` and `LOGIN_SECRET` (at least 32 characters each). For email, either configure Resend with `RESEND_API_KEY` and `RESEND_FROM`, or use Google SMTP with `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_USER` and `SMTP_FROM` set to the Google account, and a newly generated Google App Password in `SMTP_PASS`. When using Google SMTP, remove `RESEND_API_KEY` from the API project's environment. Do not set `DATABASE_PATH`.
-4. Deploy the API project and verify its `/health` URL returns HTTP 200. API startup applies the PostgreSQL schema migrations automatically.
-5. Keep the web project configured with the repository root and existing `vercel.json` web service. Set its Production `FASTIFY_API_URL` to the API project's origin only (for example, `https://your-api.vercel.app`, with no `/api` suffix), then redeploy the web project.
-6. Verify the web project's `/api/auth/csrf` returns a CSRF token, then request a new sign-in link. Email sign-in links use the API project's `APP_URL`; set it to the exact public web origin.
-7. Add Preview environment variables only if Preview builds should connect to a database and API. Do not point Preview at Production unless that is intentional.
+2. In the Vercel project, select Node.js 22 and set Production environment variables: `NODE_ENV=production`, `DATABASE_URL` (the Neon pooled connection string), `APP_URL` (the exact public web origin), `ADMIN_EMAIL`, `TRUST_PROXY=true`, distinct random values for `SESSION_SECRET` and `LOGIN_SECRET` (at least 32 characters each), and a random `CRON_SECRET`. Do not set `DATABASE_PATH`, `HOST`, or `PORT`.
+3. Configure email using either Resend (`RESEND_API_KEY` and `RESEND_FROM`) or SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`). Use a newly generated provider app password and a sender address authorized by that provider.
+4. Deploy the project. The first API request applies the PostgreSQL schema migrations automatically. Verify `/api/health`, then request a new sign-in link from the public app. The included Vercel Cron calls `/api/cron/reminders` every minute and authenticates using `CRON_SECRET`; the deployment plan must support minute-level cron jobs.
+5. Add Preview variables only if Preview deployments should connect to a database. Do not point Preview at Production unless intentional.
 
-The first API startup against a new Neon database creates an empty schema. No production SQLite file or export was available during this setup, so existing live records have not been migrated. Keep the old deployment untouched and do not treat the new database as a data-preserving cutover until those records have been recovered and imported. Reminder delivery also depends on a continuously running worker; Vercel Functions do not guarantee that a background interval stays alive between requests.
+The first API startup against a new Neon database creates an empty schema. No production SQLite file or export was available during this setup, so existing live records have not been migrated. Keep the old deployment untouched and do not treat the new database as a data-preserving cutover until those records have been recovered and imported. Vercel Functions do not keep an in-memory reminder worker alive; the scheduled route is the reminder worker for Vercel. For self-hosting, configure an external scheduler to call the same protected route once per minute.
 
-The Docker Compose/Caddy instructions below are only for self-hosting on a VPS; they are not required for Vercel + Neon.
+The Docker Compose/Caddy instructions below are only for self-hosting on a VPS; they are not required for Vercel + Neon. SMTP uses your configured mail provider; it does not require a local Docker mail service.
 
-Docker Compose includes the app, Caddy TLS reverse proxy, a Mailpit service for local testing, and an optional daily backup service. Deploy on a small VPS with Docker Engine and Compose installed:
+Docker Compose includes the app, Caddy TLS reverse proxy, and an optional daily backup service. Deploy on a small VPS with Docker Engine and Compose installed:
 
 1. Point an A/AAAA DNS record for your hostname to the VPS. Open inbound TCP 80/443 (and UDP 443 if using HTTP/3).
 2. Copy `.env.example` to `.env`; set `NODE_ENV=production`, `ADMIN_EMAIL`, two strong secrets, and `PUBLIC_DOMAIN`. Configure Resend by setting `RESEND_API_KEY` and a verified `SMTP_FROM` domain/address. Alternatively configure an SMTP provider with `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`.
 3. Verify the sender domain with your email provider and publish its SPF and DKIM DNS records (and DMARC policy). The app does not configure DNS for you.
 4. Start with `docker compose up -d --build`. Caddy obtains and renews HTTPS certificates. The app listens only on the Compose network; persist the `zarghamflow-data` volume.
 5. Enable daily backups with `docker compose --profile backup up -d backup`. Backups are retained for 14 days in `zarghamflow-backups`; also copy encrypted backups off-host.
-6. Check `https://your-domain/health`, sign in, then enable push in Settings after generating VAPID keys with `npx web-push generate-vapid-keys`.
+6. Check `https://your-domain/api/health`, sign in, then enable push in Settings after generating VAPID keys with `npx web-push generate-vapid-keys`.
 
 SQLite volume advice: restrict host filesystem permissions, encrypt the VPS disk/volume or use encrypted off-host backups, and limit access to the Docker host. Do not horizontally scale this SQLite deployment across hosts; migrate to PostgreSQL before that.
 
@@ -83,7 +81,7 @@ SQLite volume advice: restrict host filesystem permissions, encrypt the VPS disk
 
 A daily SQLite backup runs via the optional Compose profile. To create one manually from the project root, use `npm run db:backup --workspace @zarghamflow/server` (with the production environment and database volume available). The command uses SQLite's online backup API and prunes local snapshots older than 14 days. For Neon, configure and verify database backup/point-in-time recovery in the Neon console; the local SQLite backup command does not back up PostgreSQL.
 
-To restore: stop the app (`docker compose stop app`), copy the chosen `.sqlite` file over the database file in the `zarghamflow-data` volume, ensure ownership/read permissions match the container, then run `docker compose up -d app`. Keep an untouched copy before replacement. For cross-version moves, start the app and allow migrations to apply, then validate `/health` and export a JSON backup from the UI.
+To restore: stop the app (`docker compose stop app`), copy the chosen `.sqlite` file over the database file in the `zarghamflow-data` volume, ensure ownership/read permissions match the container, then run `docker compose up -d app`. Keep an untouched copy before replacement. For cross-version moves, start the app and allow migrations to apply, then validate `/api/health` and export a JSON backup from the UI.
 
 The UI's JSON export is also suitable for migration. It accepts the old app format `{ meetings, tasks, settings? }`, including legacy `followUp`, `dueTime`, and meeting IDs; old non-UUID IDs are remapped and linked tasks are reconnected when possible. Import supports merge or replace via `/api/v1/import`.
 
@@ -95,20 +93,20 @@ The service worker provides navigation fallback, static asset stale-while-revali
 
 ## API Summary
 
-All application endpoints are under `/api/v1`; protected endpoints use the HttpOnly `zf_session` cookie. Mutations require the `zf_csrf` cookie echoed as `X-CSRF-Token`. `/health` is unauthenticated. `/docs` serves Swagger UI and `openapi.yaml` is the full source contract.
+All application endpoints are under `/api/v1`; protected endpoints use the HttpOnly `zf_session` cookie. Mutations require the `zf_csrf` cookie echoed as `X-CSRF-Token`. `/api/health` is unauthenticated. `openapi.yaml` is the full source contract.
 
 - Auth: `GET auth/csrf`, `POST auth/signup` (also `POST auth/request`), `POST auth/verify`, `GET auth/me`, `POST auth/logout`, `POST auth/logout-all`, `GET auth/sessions`.
 - Admin: `GET admin/users`, `PATCH admin/users/:id` for role and activation management.
 - Planner: CRUD `/meetings` and `/tasks`, `POST meetings/:id/duplicate`, `POST tasks/quick-add`, `GET dashboard`.
 - Data: `POST import`, `GET export.json`, `GET export.csv`, `GET export.ics`.
 - Reminders: `GET/PUT reminder-preferences`, `GET reminders`, `POST reminders/test`, push public key/subscribe endpoints.
-- Health: `/health`.
+- Health: `/api/health`.
 
 ## Reminder Behavior
 
 Task lead reminders default to 24 hours and 1 hour; meeting reminders to 60 and 15 minutes; follow-up reminders target 08:00 local time. Date-only tasks are due at 23:59 local and notify at 09:00. All scheduled instants are stored as UTC and calculated with the user's IANA timezone. Spring-gap wall times are rejected; ambiguous fall-back times use Luxon's first occurrence. Quiet-hour reminders defer to the local quiet-end time, except meeting reminders when the event starts within 30 minutes. Meeting reminder emails include an `.ics` attachment; task emails include single-use, expiring Mark done and Snooze 1 hour links.
 
-The worker claims due rows transactionally (`pending` → `processing`), records sent/failed state, and retries failures with exponential backoff up to six attempts. SQLite and SMTP cannot provide true distributed exactly-once delivery across a process crash between provider acceptance and database acknowledgement; this implementation is idempotent at the reminder-row level but SMTP is at-least-once in that narrow crash window. Configure your provider's delivery logs/alerts for stronger operational visibility.
+The worker claims due rows transactionally (`pending` → `processing`), records sent/failed state, and retries failures with exponential backoff up to six attempts. On Vercel, the protected `/api/cron/reminders` route is invoked every minute by Vercel Cron; the `CRON_SECRET` environment variable must be set. On self-hosted deployments, configure a scheduler to invoke that route every minute. SQLite and SMTP cannot provide true distributed exactly-once delivery across a process crash between provider acceptance and database acknowledgement; this implementation is idempotent at the reminder-row level but SMTP is at-least-once in that narrow crash window. Configure your provider's delivery logs/alerts for stronger operational visibility.
 
 ## Checks
 

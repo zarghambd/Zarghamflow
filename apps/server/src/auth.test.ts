@@ -3,9 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { FastifyInstance } from 'fastify';
 import { DateTime } from 'luxon';
 import { localToUtc } from './reminders/time.js';
+import type { ApiTestApp, InjectResponse } from './http-types.js';
 
 const ownerEmail = 'owner@example.test';
 const testDir = mkdtempSync(join(tmpdir(), 'zarghamflow-auth-'));
@@ -13,11 +13,11 @@ process.env.NODE_ENV = 'test';
 process.env.OWNER_EMAIL = ownerEmail;
 process.env.APP_URL = 'http://localhost:5173';
 process.env.DATABASE_PATH = join(testDir, 'auth.sqlite');
+delete process.env.DATABASE_URL;
 process.env.SESSION_SECRET = 'auth-test-session-secret-0123456789abcdef';
 process.env.LOGIN_SECRET = 'auth-test-login-secret-0123456789abcdef';
 
-let app: FastifyInstance;
-type InjectResponse = Awaited<ReturnType<FastifyInstance['inject']>>;
+let app: ApiTestApp;
 let sqlite: typeof import('./db/index.js').sqlite;
 let takeTestMails: typeof import('./mail.js').takeTestMails;
 let failNextTestEmails: typeof import('./mail.js').failNextTestEmails;

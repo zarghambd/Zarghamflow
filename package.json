@@ -11,7 +11,7 @@
     "apps/web"
   ],
   "scripts": {
-    "dev": "npm run build --workspace @zarghamflow/shared && concurrently -k -n api,web \"npm:dev --workspace @zarghamflow/server\" \"npm:dev --workspace @zarghamflow/web\"",
+    "dev": "npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server && npm run dev --workspace @zarghamflow/web",
     "build": "npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server && npm run build --workspace @zarghamflow/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint apps packages --max-warnings=0",

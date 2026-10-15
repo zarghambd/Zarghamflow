@@ -229,9 +229,8 @@ code{background:var(--surface2);padding:0 5px;border-radius:5px;font-size:12.5px
  *   3) emails you reminders (task deadlines, upcoming meetings, follow-ups) every 5 minutes,
  *      even when the ZarghamFlow page is closed.
  * Deploy as: Web app · Execute as: Me · Who has access: Anyone.
- * Only requests that carry the secret TOKEN below are accepted.
+ * Only requests carrying the token stored in Script Properties are accepted.
  */
-var TOKEN = '__TOKEN__';
 var P = PropertiesService.getScriptProperties();
 var CHUNK = 3000;
 
@@ -243,10 +242,17 @@ function doPost(e) {
   try {
     lock.waitLock(25000);
     var body = JSON.parse(e.postData.contents);
-    if (body.token !== TOKEN) return out_({ ok: false, error: 'Wrong token – copy the setup script again from the app.' });
+    var token = P.getProperty('ZARGHAMFLOW_TOKEN') || '';
+    if (!token || body.token !== token) return out_({ ok: false, error: 'Wrong token – check the app token and Script Properties.' });
     if (body.action === 'test') return out_(test_(body));
     if (body.action === 'load') return out_(loadDatabase_());
-    if (body.action === 'sync') return out_(sync_(body));
+    if (body.action === 'sync') {
+      if (!Array.isArray(body.allMeetingIds)) return out_({ ok: false, error: 'The complete meeting ID list is required.' });
+      if (body.allMeetingIds.length === 0 && body.confirmEmpty !== true) {
+        return out_({ ok: false, error: 'Confirm the empty meeting list in ZarghamFlow before syncing.' });
+      }
+      return out_(sync_(body));
+    }
     return out_({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return out_({ ok: false, error: String(err) });
@@ -1202,7 +1208,7 @@ const explainErr = e => (e instanceof TypeError)
   : (e && e.message) || String(e);
 
 /* ---- What gets sent to your script: upcoming meetings + open tasks ---- */
-function buildPayload() {
+function buildPayload(confirmEmpty = false) {
   const n = DB.settings.notify, from = addDays(today(), -1);
   const meetings = DB.meetings.filter(m => m.date >= from || (m.followUp && m.followUp >= from)).map(m => ({
     id: m.id, title: m.title, date: m.date, start: m.start, end: m.end, client: m.client, contacts: m.contacts, type: m.type,
@@ -1215,7 +1221,8 @@ function buildPayload() {
     action: 'sync', tz: tzName(), email: n.email,
     records: { meetings: DB.meetings, tasks: DB.tasks },
     prefs: { emailOn: n.emailOn, taskLeadHours: n.taskLeadHours, meetingLeadMinutes: n.meetingLeadMinutes, overdueOn: n.overdueOn, followUpOn: n.followUpOn, calendarOn: n.calendarOn },
-    allMeetingIds: DB.meetings.map(m => m.id), meetings, tasks
+    allMeetingIds: DB.meetings.map(m => m.id), meetings, tasks,
+    ...(confirmEmpty ? { confirmEmpty: true } : {})
   };
 }
 
@@ -1251,7 +1258,15 @@ async function syncNow(silent) {
   const n = DB.settings.notify;
   if (!notifyReady()) { if (!silent) toast('Set up the Google connection first (🔔 button).', 'warn'); return false; }
   if (syncing) { scheduleSync(); return false; }
-  const payload = buildPayload(), sig = hashStr(JSON.stringify(payload));
+  const confirmEmpty = DB.meetings.length === 0
+    ? await confirmBox({
+      title: 'Sync with no meetings?',
+      message: 'This will remove all meetings previously created by the Google companion. Confirm only if your complete meeting list is intentionally empty.',
+      buttons: [{ label: 'Cancel', value: false }, { label: 'Sync empty list', value: true, cls: 'danger' }]
+    })
+    : false;
+  if (DB.meetings.length === 0 && !confirmEmpty) return false;
+  const payload = buildPayload(confirmEmpty), sig = hashStr(JSON.stringify(payload));
   if (silent && sig === n.lastSig && n.lastStatus === 'ok') return true;
   syncing = true; updateBadge('busy');
   try {
@@ -1326,7 +1341,7 @@ function exportICS(list, name) {
 }
 
 /* ---- Settings dialog ---- */
-function gasScript() { return $('#gas-template').textContent.replace('__TOKEN__', DB.settings.notify.token).trim() + '\n'; }
+function gasScript() { return $('#gas-template').textContent.trim() + '\n'; }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* fall back below */ }
   try {
@@ -1344,7 +1359,6 @@ function notifyStatusHTML() {
 }
 function openNotifyModal() {
   const n = DB.settings.notify;
-  if (!n.token) { n.token = randToken(); persist(); }
   const opts = (list, cur, label) => list.map(v => `<option value="${v}"${v === cur ? ' selected' : ''}>${label(v)}</option>`).join('');
   const hrs = v => v < 24 ? `${v} hour${v > 1 ? 's' : ''}` : `${v / 24} day${v > 24 ? 's' : ''}`;
   const mins = v => v < 60 ? `${v} minutes` : v === 60 ? '1 hour' : v < 1440 ? `${v / 60} hours` : '1 day';
@@ -1353,8 +1367,9 @@ function openNotifyModal() {
     <div id="notify-status">${notifyStatusHTML()}</div>
     <details class="help"${notifyReady() ? '' : ' open'}><summary>One-time setup (4 steps)</summary>
       <ol>
-        <li>Click <b>Copy setup script</b> below.</li>
-        <li>Open <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener noreferrer">script.google.com</a> (signed in with your Gmail) → <b>New project</b>. Delete the sample code, paste the script, press <b>Save</b>.</li>
+        <li>Choose a private token of at least 32 characters in the token field below, then click <b>Copy setup script</b>.</li>
+        <li>Open <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener noreferrer">script.google.com</a> (signed in with your Gmail) → <b>New project</b>. Delete the sample code, paste the script, and press <b>Save</b>.</li>
+        <li>In <b>Project Settings → Script Properties</b>, add <code>ZARGHAMFLOW_TOKEN</code> with the exact token from the app.</li>
         <li>Click <b>Deploy → New deployment</b> → gear icon → <b>Web app</b>. Set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>. When Google asks for permission, choose your account → <i>Advanced</i> → <i>Go to project</i> → <i>Allow</i> (it is your own script).</li>
         <li>Copy the <b>Web app URL</b> (ends in <code>/exec</code>), paste it below and press <b>Test connection</b>.</li>
       </ol>
@@ -1364,8 +1379,8 @@ function openNotifyModal() {
       <div class="field"><label for="n-email">Your Gmail address (reminders go here)</label><input id="n-email" type="email" name="email" maxlength="200" value="${esc(n.email)}" placeholder="you@gmail.com"><div class="err" data-err="email"></div></div>
       <div class="field"><label for="n-url">Web app URL from step 4</label><input id="n-url" name="scriptUrl" maxlength="400" value="${esc(n.scriptUrl)}" placeholder="https://script.google.com/macros/s/…/exec"><div class="err" data-err="scriptUrl"></div></div>
     </div>
-    <div class="field"><label for="n-token">Private token (already inside the copied script)</label>
-      <div style="display:flex;gap:8px"><input id="n-token" name="token" value="${esc(n.token)}" readonly><button type="button" class="btn sm" data-action="regen-token">New token</button></div></div>
+    <div class="field"><label for="n-token">Private token (stored in this browser and in Apps Script properties)</label>
+      <div style="display:flex;gap:8px"><input id="n-token" name="token" type="text" maxlength="80" autocomplete="off" spellcheck="false" value="${esc(n.token)}" placeholder="Enter at least 32 random characters"><button type="button" class="btn sm" data-action="regen-token">Generate token</button></div><div class="err" data-err="token"></div></div>
 
     <div class="sec-title">Email reminders</div>
     <div class="field"><label class="chk"><input type="checkbox" name="emailOn"${n.emailOn ? ' checked' : ''}> Send me reminder emails</label></div>
@@ -1395,14 +1410,15 @@ function openNotifyModal() {
 function applyNotifyForm(form, needUrl) {
   clearErrs(form);
   const f = form.elements, n = DB.settings.notify;
-  const email = f.email.value.trim(), url = f.scriptUrl.value.trim();
+  const email = f.email.value.trim(), url = f.scriptUrl.value.trim(), token = f.token.value.trim();
   let ok = true; const bad = (k, m) => { setErr(form, k, m); ok = false; };
   if (email && !EMAIL_RE.test(email)) bad('email', 'Please enter a valid email address.');
   if (url && !urlOk(url)) bad('scriptUrl', 'This must be the Web app URL: it starts with https://script.google.com/ and ends in /exec.');
   if (needUrl && !url) bad('scriptUrl', 'Paste the Web app URL from step 4 first.');
+  if (needUrl && token.length < 32) bad('token', 'Enter a private token of at least 32 characters.');
   if (!ok) { focusFirstInvalid(form); return false; }
   Object.assign(n, {
-    email, scriptUrl: url, emailOn: f.emailOn.checked, taskLeadHours: Number(f.taskLeadHours.value),
+    email, scriptUrl: url, token, emailOn: f.emailOn.checked, taskLeadHours: Number(f.taskLeadHours.value),
     meetingLeadMinutes: Number(f.meetingLeadMinutes.value), overdueOn: f.overdueOn.checked, followUpOn: f.followUpOn.checked,
     calendarOn: f.calendarOn.checked, calendarTypes: [...form.querySelectorAll('input[name=ctype]:checked')].map(x => x.value), lastSig: ''
   });
@@ -1529,6 +1545,13 @@ function onFilterEvent(e) {
     ui.selDate = el.value; render();
   } else if (el.dataset.action === 'toggle-task' && e.type === 'change') handleAction(el);
 }
+document.addEventListener('input', event => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement && target.id === 'n-token') {
+    DB.settings.notify.token = target.value.slice(0, 80);
+    persist();
+  }
+});
 document.addEventListener('input', onFilterEvent);
 document.addEventListener('change', onFilterEvent);
 

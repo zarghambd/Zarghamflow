@@ -17,11 +17,11 @@ ZarghamFlow is a multi-user meeting and task planner with email-verified signup 
 
 Prerequisites: Node.js 20+ (Node 22 recommended) and npm.
 
-1. Copy `.env.example` to `.env` and set `ADMIN_EMAIL` and a random `LOGIN_SECRET` of at least 32 characters. Anyone can create an account by verifying their email; only the designated admin address receives administrator privileges automatically.
+1. Copy `.env.example` to `.env` and set `ADMIN_EMAIL` and a random `LOGIN_SECRET` of at least 32 characters. Anyone can create an account by verifying their email; only the designated admin address receives administrator privileges automatically. The first verified user becomes admin only in development/test when `ADMIN_EMAIL` is omitted.
 2. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` for a mail provider. For local development, if mail delivery is unavailable, development mode displays a one-time sign-in link instead.
 3. Run `npm ci`.
 4. Run `npm run dev`. The app and API are both available at `http://127.0.0.1:3001`; health is at `/api/health`.
-5. Open the app, enter an email address, and follow the emailed verification link. The first verified user becomes admin if `ADMIN_EMAIL` is unset; otherwise the matching `ADMIN_EMAIL` user becomes admin. Admins can manage roles and disable accounts from the **Users** tab.
+5. Open the app, enter an email address, and follow the emailed verification link. The matching `ADMIN_EMAIL` user becomes admin. In production, startup fails unless `ADMIN_EMAIL` is configured; never rely on first-user bootstrap there. Admins can manage roles and disable accounts from the **Users** tab.
 
 Database migrations are applied when the API is first used. For explicit migration, run `npm run db:migrate`. Use `npm run db:seed` only in development/test mode to add sample records.
 
@@ -33,7 +33,7 @@ Database migrations are applied when the API is first used. For explicit migrati
 | `HOST` / `PORT` | Legacy standalone server bind settings (not used by Next.js) | `127.0.0.1` / `3000` |
 | `DATABASE_PATH` | SQLite file location | `./data/zarghamflow.sqlite` |
 | `DATABASE_URL` | PostgreSQL connection URL for Neon deployments | Unset for local SQLite |
-| `ADMIN_EMAIL` | Designated initial administrator email; if unset, the first verified account becomes admin | Optional but recommended |
+| `ADMIN_EMAIL` | Designated initial administrator email | Required in production and on Vercel; optional only in development/test |
 | `OWNER_EMAIL` | Legacy compatibility email; no longer restricts signup | Optional |
 | `APP_URL` | Public app origin for sign-in/action links | `http://127.0.0.1:3001` |
 | `LOGIN_SECRET` | HMAC key used to hash client IPs for authentication/rate-limiting records | Required, 32+ random chars |
@@ -61,7 +61,7 @@ Use one Vercel project for the Next.js app and its API routes. Set the **Framewo
    - `APP_URL`: the exact public HTTPS origin used for magic-link callback URLs, for example `https://www.example.com`.
    - `LOGIN_SECRET`: a random value of at least 32 characters.
    - Email delivery: either `RESEND_API_KEY` and `RESEND_FROM`, or `SMTP_HOST` and `SMTP_PORT`, with `SMTP_USER` and `SMTP_PASS` both set when the provider requires authentication; set `SMTP_FROM` to an authorized sender address.
-   - `ADMIN_EMAIL` is optional and selects the designated initial administrator. `CRON_SECRET` is needed only for scheduled reminder processing. `TRUST_PROXY` can be set to `true` when proxy-derived client IPs are desired.
+   - `ADMIN_EMAIL` is required and selects the designated initial administrator. `CRON_SECRET` is needed only for scheduled reminder processing. `TRUST_PROXY` can be set to `true` when proxy-derived client IPs are desired.
 
    Vercel provides `VERCEL=1`; the server validates the required database, callback origin, secrets, and email provider configuration in production. Do not set `DATABASE_PATH`, `HOST`, or `PORT`. Do not put credentials in `NEXT_PUBLIC_*` variables.
 3. Configure email using either Resend or SMTP as described above. Use a newly generated provider app password and a sender address authorized by that provider.

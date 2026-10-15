@@ -96,18 +96,21 @@ export function registerAuth(app: ApiApp): void {
       if (current && !current.active) return undefined;
       const claimed = await database.run("UPDATE login_tokens SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL AND expires_at > ?", [now, token.id, now]);
       if (!claimed.changes) return undefined;
+      const configuredAdmin = config.ADMIN_EMAIL?.trim().toLowerCase();
+      const allowFirstUserAdmin = config.NODE_ENV === 'development' || config.NODE_ENV === 'test';
       const adminCount = await database.get<{ count: number | string }>("SELECT COUNT(*) AS count FROM users WHERE role='admin' AND active=1");
       const hasAdmin = Number(adminCount?.count ?? 0) > 0;
-      const configuredAdmin = config.ADMIN_EMAIL?.trim().toLowerCase();
       let user: UserRow;
       if (current) {
-        if ((!hasAdmin && !configuredAdmin) || (configuredAdmin && current.email.toLowerCase() === configuredAdmin)) {
+        if ((allowFirstUserAdmin && !hasAdmin && !configuredAdmin) || (configuredAdmin && current.email.toLowerCase() === configuredAdmin)) {
           await database.run("UPDATE users SET role='admin',updated_at=? WHERE id=?", [now, current.id]);
           current.role='admin';
         }
         user = current;
       } else {
-        const role = configuredAdmin ? (token.email.toLowerCase() === configuredAdmin ? 'admin' : 'user') : (!hasAdmin ? 'admin' : 'user');
+        const role = configuredAdmin
+          ? (token.email.toLowerCase() === configuredAdmin ? 'admin' : 'user')
+          : (allowFirstUserAdmin && !hasAdmin ? 'admin' : 'user');
         user = { id: randomUUID(), email: token.email.toLowerCase(), timezone: 'UTC', locale: 'en-GB', settings_json: '{}', role, active: 1 };
         await database.run('INSERT INTO users (id,email,timezone,locale,settings_json,role,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
           [user.id, user.email, user.timezone, user.locale, user.settings_json, user.role, user.active, now, now]);

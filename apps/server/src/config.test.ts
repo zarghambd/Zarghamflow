@@ -11,6 +11,7 @@ const validVercelEnvironment: NodeJS.ProcessEnv = {
   DATABASE_URL: 'postgresql://user:password@example.test/database',
   APP_URL: 'https://taskora.example',
   LOGIN_SECRET: 'production-login-secret-0123456789abcdef',
+  ADMIN_EMAIL: 'admin@example.test',
   RESEND_API_KEY: 're_test_key',
   RESEND_FROM: 'Taskora <login@example.test>'
 };
@@ -22,6 +23,19 @@ describe('Vercel production configuration', () => {
 
   it('rejects missing database configuration', () => {
     expect(() => parseConfig({ ...validVercelEnvironment, DATABASE_URL: undefined })).toThrow('DATABASE_URL');
+  });
+
+  it('requires ADMIN_EMAIL for production and Vercel deployments', () => {
+    expect(() => parseConfig({ ...validVercelEnvironment, ADMIN_EMAIL: undefined })).toThrow('ADMIN_EMAIL is required');
+    expect(() => parseConfig({
+      NODE_ENV: 'development',
+      VERCEL: '1',
+      LOGIN_SECRET: 'production-login-secret-0123456789abcdef'
+    })).toThrow('ADMIN_EMAIL is required');
+    expect(() => parseConfig({
+      NODE_ENV: 'production',
+      LOGIN_SECRET: 'production-login-secret-0123456789abcdef'
+    })).toThrow('ADMIN_EMAIL is required');
   });
 
   it('rejects missing callback origin', () => {

@@ -30,6 +30,9 @@ const envSchema = z.object({
 
 export function parseConfig(env: NodeJS.ProcessEnv) {
   const parsed = envSchema.parse(env);
+  if ((parsed.NODE_ENV === 'production' || env.VERCEL === '1') && !parsed.ADMIN_EMAIL?.trim()) {
+    throw new Error('Invalid production configuration: ADMIN_EMAIL is required.');
+  }
   if (parsed.NODE_ENV === 'production' && env.VERCEL === '1') {
     const missing: string[] = [];
     if (!parsed.DATABASE_URL) missing.push('DATABASE_URL');

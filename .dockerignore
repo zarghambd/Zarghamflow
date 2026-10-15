@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+.next
+**/.next
+.env*
+**/.env*
+data
+**/data
+backups
+**/backups
+.git
+.vercel
+coverage
+**/coverage

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const rootDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: true,
   experimental: {
     typedRoutes: false,

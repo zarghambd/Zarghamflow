@@ -47,7 +47,7 @@ Database migrations are applied when the API is first used. For explicit migrati
 | `TRUST_PROXY` | Trust reverse-proxy headers | `false`; set `true` behind Caddy |
 | `RATE_LIMIT_MAX` | General API requests per minute/IP | `60` |
 
-Never commit `.env`. Generate secrets with a password manager or `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Session cookies contain high-entropy random tokens and only their hashes are stored in the database; revoke sessions from Settings if an active session token may have been exposed.
+Never commit `.env` or any `.env.*` file; Git ignores these files except `.env.example`. Generate secrets with a password manager or `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Session cookies contain high-entropy random tokens and only their hashes are stored in the database; revoke sessions from Settings if an active session token may have been exposed.
 
 ## Production Deployment
 

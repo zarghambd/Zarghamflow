@@ -3,10 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { config } from './config.js';
-import { isPostgres, sqlite } from './db/index.js';
+import { initializeDatabase, isPostgres, sqlite } from './db/index.js';
 
 if (config.NODE_ENV === 'production') throw new Error('Refusing to seed sample records in production.');
 if (isPostgres) throw new Error('The seed command only supports SQLite. Unset DATABASE_URL to seed a local development database.');
+await initializeDatabase();
 const seedEmail = config.OWNER_EMAIL ?? config.ADMIN_EMAIL;
 if (!seedEmail) throw new Error('Set OWNER_EMAIL or ADMIN_EMAIL before seeding.');
 const schemaExists = sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get();

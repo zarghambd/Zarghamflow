@@ -14,15 +14,20 @@ let sqliteInstance: SqliteDatabase | undefined;
 const isPostgres = Boolean(config.DATABASE_URL);
 const pool = config.DATABASE_URL ? new Pool({ connectionString: config.DATABASE_URL, max: 5 }) : undefined;
 let sqliteQueue: Promise<void> = Promise.resolve();
+let sqliteInitialization: Promise<void> | undefined;
 
-if (!isPostgres) {
-  const { default: Sqlite } = await import('better-sqlite3');
-  const databasePath = resolve(process.cwd(), config.DATABASE_PATH);
-  mkdirSync(dirname(databasePath), { recursive: true });
-  sqliteInstance = new Sqlite(databasePath);
-  sqliteInstance.pragma('journal_mode = WAL');
-  sqliteInstance.pragma('foreign_keys = ON');
-  sqliteInstance.pragma('busy_timeout = 5000');
+export async function initializeDatabase(): Promise<void> {
+  if (isPostgres || sqliteInstance) return;
+  sqliteInitialization ??= (async () => {
+    const { default: Sqlite } = await import('better-sqlite3');
+    const databasePath = resolve(process.cwd(), config.DATABASE_PATH);
+    mkdirSync(dirname(databasePath), { recursive: true });
+    sqliteInstance = new Sqlite(databasePath);
+    sqliteInstance.pragma('journal_mode = WAL');
+    sqliteInstance.pragma('foreign_keys = ON');
+    sqliteInstance.pragma('busy_timeout = 5000');
+  })();
+  await sqliteInitialization;
 }
 
 export { isPostgres };
@@ -103,13 +108,19 @@ const sqliteQueries = sqliteSession();
 const queries = pool ? postgresSession(pool) : sqliteQueries;
 
 export const dbGet = <T extends Record<string, unknown>>(sql: string, params?: SqlParams): Promise<T | undefined> =>
-  pool ? queries.get<T>(sql, params) : withSqliteLock(async () => await queries.get<T>(sql, params));
+  pool
+    ? queries.get<T>(sql, params)
+    : initializeDatabase().then(() => withSqliteLock(async () => await queries.get<T>(sql, params)));
 
 export const dbAll = <T extends Record<string, unknown>>(sql: string, params?: SqlParams): Promise<T[]> =>
-  pool ? queries.all<T>(sql, params) : withSqliteLock(async () => await queries.all<T>(sql, params));
+  pool
+    ? queries.all<T>(sql, params)
+    : initializeDatabase().then(() => withSqliteLock(async () => await queries.all<T>(sql, params)));
 
 export const dbRun = (sql: string, params?: SqlParams): Promise<{ changes: number }> =>
-  pool ? queries.run(sql, params) : withSqliteLock(async () => await queries.run(sql, params));
+  pool
+    ? queries.run(sql, params)
+    : initializeDatabase().then(() => withSqliteLock(async () => await queries.run(sql, params)));
 
 export async function dbTransaction<T>(operation: (session: DatabaseSession) => Promise<T>): Promise<T> {
   if (pool) {
@@ -127,6 +138,7 @@ export async function dbTransaction<T>(operation: (session: DatabaseSession) => 
     }
   }
 
+  await initializeDatabase();
   if (!sqliteInstance) throw new Error('The SQLite database is not initialized.');
   if (sqliteTransaction.getStore()) return operation(sqliteQueries);
   const release = await (async () => {

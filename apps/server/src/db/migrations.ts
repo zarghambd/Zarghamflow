@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { dbTransaction, isPostgres, sqlite } from './index.js';
+import { dbTransaction, initializeDatabase, isPostgres, sqlite } from './index.js';
 
 const sqliteMigrations = ['0001_initial.sql', '0002_multi_user.sql', '0003_email_otp.sql', '0004_restore_magic_links.sql'];
 const migrationDirectories = [
@@ -19,6 +19,7 @@ function readMigration(name: string): string {
 
 export async function applyMigrations(): Promise<void> {
   if (!isPostgres) {
+    await initializeDatabase();
     sqlite.exec('CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
     const applied = sqlite.prepare('SELECT name FROM schema_migrations WHERE name = ?');
     for (const name of sqliteMigrations) {

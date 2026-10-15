@@ -9,6 +9,7 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     typedRoutes: false,
+    serverComponentsExternalPackages: ['better-sqlite3'],
     outputFileTracingRoot: rootDirectory,
     outputFileTracingIncludes: {
       '/api/*': ['../../apps/server/migrations/*.sql'],

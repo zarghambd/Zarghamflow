@@ -35,7 +35,7 @@ type BeforeInstallPromptEvent = Event & { prompt(): Promise<void>; userChoice: P
 let waitingWorker: ServiceWorker | null = null;
 
 const escapeHtml = (value: unknown): string => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
-type ApiError = Error & { status?: number; code?: string; developmentLink?: string };
+type ApiError = Error & { status?: number; code?: string };
 const toLocalRecord = <T extends Record<string, unknown>>(row: T): T => {
   const names: Record<string, string> = { user_id: 'userId', follow_up_date: 'followUpDate', due_date: 'dueDate', due_time: 'dueTime', meeting_id: 'meetingId', completed_at: 'completedAt', created_at: 'createdAt', updated_at: 'updatedAt', deleted_at: 'deletedAt', reminder_lead_json: 'reminderLeadMinutes', reminderLeadJson: 'reminderLeadMinutes' };
   const result: Record<string, unknown> = {};
@@ -71,7 +71,7 @@ async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
     }
   }
   const payload = typeof data === 'object' && data !== null
-    ? data as { error?: { message?: string; code?: string; fields?: Array<{ path: string[]; message: string }> }; developmentLink?: unknown }
+    ? data as { error?: { message?: string; code?: string; fields?: Array<{ path: string[]; message: string }> } }
     : undefined;
   if (!response.ok) {
     const fieldMessages = payload?.error?.fields?.map((field) => `${field.path.join('.') || 'Form'}: ${field.message}`);
@@ -81,7 +81,6 @@ async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
     const error: ApiError = new Error(message);
     error.status = response.status;
     if (payload?.error?.code) error.code = payload.error.code;
-    if (typeof payload?.developmentLink === 'string') error.developmentLink = payload.developmentLink;
     throw error;
   }
   if (data === undefined) throw new Error(`Invalid server response (${response.status}).`);
@@ -412,7 +411,7 @@ function listView(kind: 'meetings'|'tasks'): string {
   return `<div class="page-head"><h1>${isMeetings?'Meetings':'Tasks'}</h1><button class="btn primary" data-action="new-${isMeetings?'meeting':'task'}">＋ New ${isMeetings?'meeting':'task'}</button></div>${!isMeetings?quickAdd():''}<div class="filters"><input class="search" id="search" value="${escapeHtml(state.search)}" placeholder="Search title, client, notes…" aria-label="Search ${kind}"><select id="range" aria-label="Filter by date">${rangeOptions.map(([value,label])=>`<option value="${value}" ${state.range===value?'selected':''}>${label}</option>`).join('')}</select><select id="status" aria-label="Filter by status">${statusOptions.map((value)=>`<option value="${value}" ${state.status===value?'selected':''}>${value==='all'?'All statuses':value==='open'?'Open':value}</option>`).join('')}</select><select id="client-filter" aria-label="Filter by client"><option value="">All clients</option>${clients.map((client)=>`<option value="${escapeHtml(client)}" ${state.client===client?'selected':''}>${escapeHtml(client)}</option>`).join('')}</select>${modeFilters}<button class="btn" data-action="export-json">Export JSON</button><button class="btn" data-action="reset-filters">Reset filters</button></div><div class="meta" style="margin-bottom:10px">${list.length} ${kind}</div><div class="items">${renderedItems||`<div class="empty">No ${kind} match these filters.</div>`}</div>`;
 }
 function render(dashboardData?: Record<string, unknown>): void {
-  if (!state.user) { renderSignIn(); return; }
+  if (!state.user) { window.location.replace('/signin'); return; }
   app.innerHTML = shell(state.view==='dashboard'?dashboard(dashboardData):state.view==='settings'?settingsView():state.view==='admin'&&state.role==='admin'?adminView():listView(state.view as 'meetings'|'tasks'));
   if (state.updateAvailable) {
     const banner = document.createElement('div');
@@ -424,9 +423,6 @@ function render(dashboardData?: Record<string, unknown>): void {
   document.documentElement.dataset.theme = localStorage.getItem('zf-theme') ?? 'light';
   const dialog = document.querySelector<HTMLDialogElement>('#dialog');
   if (dialog && !dialog.open) dialog.addEventListener('close', () => { document.body.style.overflow = ''; });
-}
-function renderSignIn(message = '', developmentLink = ''): void {
-  app.innerHTML = `<main class="shell"><section class="panel signin"><div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m8 17 5 5 11-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Taskora</div><h1>Sign in or create account</h1><p>Enter your email and we’ll send a one-time link to verify it and continue.</p>${message?`<div class="banner" role="alert">${escapeHtml(message)}</div>`:''}${developmentLink?`<p class="signin-dev-link"><a href="${escapeHtml(developmentLink)}">Continue using the local sign-in link</a></p>`:''}<form data-form="signin"><div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required><button class="btn primary" style="margin-top:10px">Email me a secure link</button></div></form></section></main>`;
 }
 function adminView(): string {
   const query=state.search.trim().toLowerCase();
@@ -532,7 +528,7 @@ async function handleAction(element: HTMLElement): Promise<void> {
   if(action==='reset-filters'){state.search='';state.range='all';state.status='all';state.client='';state.type='';state.priority='';state.category='';render();return;}
   if(action==='clear-conflicts'){state.conflicts=[];render();return;}
   if(action==='retry-conflicts'){await reapplyConflicts();return;}
-  if(action==='logout'||action==='logout-all'){await api(`/api/v1/auth/${action==='logout'?'logout':'logout-all'}`,{method:'POST',body:'{}'});state.user='';renderSignIn('Signed out.');return;}
+  if(action==='logout'||action==='logout-all'){await api(`/api/v1/auth/${action==='logout'?'logout':'logout-all'}`,{method:'POST',body:'{}'});state.user='';window.location.replace('/signin');return;}
   if(action==='delete-meeting'&&id||action==='delete-task'&&id){if(!confirm('Delete this item?'))return;const kind=action==='delete-meeting'?'meeting':'task';if(!navigator.onLine){await queueOfflineDelete(kind,id);return;}try{await api(`/api/v1/${kind==='meeting'?'meetings':'tasks'}/${id}`,{method:'DELETE'});await refreshData();}catch(error){notify((error as Error).message);}return;}
   if(action==='duplicate'&&id){try{await api(`/api/v1/meetings/${id}/duplicate`,{method:'POST',body:'{}'});await refreshData();notify('Meeting duplicated.');}catch(error){notify((error as Error).message);}return;}
   if(action==='done'&&id){const task=state.tasks.find((row)=>row.id===id);if(task)await saveRecord('task',id,{title:task.title,dueDate:task.dueDate,dueTime:task.dueTime,priority:task.priority,status:task.status==='Done'?'To Do':'Done',category:task.category,client:task.client,meetingId:task.meetingId,notes:task.notes,completedAt:task.status==='Done'?null:new Date().toISOString()});return;}
@@ -566,14 +562,12 @@ async function enablePush():Promise<void>{
 }
 async function handleSubmit(form:HTMLFormElement):Promise<void>{
   const kind=form.dataset.form;
-  if(kind==='signin'){const data=formData(form);try{await api('/api/v1/auth/signup',{method:'POST',body:JSON.stringify(data)});renderSignIn('If the address is eligible, a sign-in link will arrive shortly.');}catch(error){const apiError=error as ApiError;renderSignIn(apiError.message,apiError.developmentLink??'');}return;}
   if(kind==='record'){const dialog=document.querySelector<HTMLDialogElement>('#dialog');const record=formData(form);const kind=dialog?.dataset.kind as 'meeting'|'task';const id=dialog?.dataset.id??'';if(!kind)return;if(!await saveRecord(kind,id,record))return;dialog?.close();render();return;}
   if(kind==='quick'){const text=String(formData(form).text??'').trim();if(!text)return;if(!navigator.onLine){const parsed=parseQuickOffline(text);if(!parsed.title){notify('Please enter a task title.');return;}await saveRecord('task','',parsed);return;}try{await api('/api/v1/tasks/quick-add',{method:'POST',body:JSON.stringify({text})});await refreshData();notify('Task added.');}catch(error){notify((error as Error).message);}return;}
   if(kind==='prefs'){const data=formData(form);const numbers=(value:unknown)=>String(value??'').split(',').map(v=>Number(v.trim())).filter(Number.isFinite);try{const prefs=await api<{prefs:ReminderPrefs}>('/api/v1/reminder-preferences',{method:'PUT',body:JSON.stringify({taskLeadMinutes:numbers(data.taskLeadMinutes),meetingLeadMinutes:numbers(data.meetingLeadMinutes),quietStart:data.quietStart,quietEnd:data.quietEnd,emailEnabled:data.emailEnabled,pushEnabled:data.pushEnabled,overdueEnabled:data.overdueEnabled,digestEnabled:data.digestEnabled,digestTime:data.digestTime,followUpEnabled:true})});state.prefs=prefs.prefs;notify('Reminder settings saved.');render();}catch(error){notify((error as Error).message);}return;}
 }
 async function importBackup(file:File):Promise<void>{try{const parsed=JSON.parse(await file.text()) as {meetings?:unknown[];tasks?:unknown[]};const mode=confirm('Replace all server records with this backup? Choose Cancel to merge it with your current records.');await api('/api/v1/import',{method:'POST',body:JSON.stringify({mode:mode?'replace':'merge',data:{meetings:parsed.meetings??[],tasks:parsed.tasks??[]}})});await refreshData();notify(mode?'Backup replaced server records.':'Backup merged.');}catch(error){notify((error as Error).message);}}
-async function consumeMagicLink():Promise<void>{const token=new URL(location.href).searchParams.get('token');if(!token)return;try{await api('/api/v1/auth/verify',{method:'POST',body:JSON.stringify({token})});history.replaceState({},'',location.pathname);await bootstrap();}catch(error){renderSignIn((error as Error).message);}}
-async function bootstrap():Promise<void>{try{await csrf();const me=await api<{user:{email:string;role:'admin'|'user'}}>('/api/v1/auth/me');state.user=me.user.email;state.role=me.user.role;localStorage.setItem('zf-owner-email',state.user);localStorage.setItem('zf-owner-role',state.role);await refreshData();await syncOutbox();void api('/api/v1/settings/timezone',{method:'POST',body:JSON.stringify({timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})}).catch((error:unknown)=>console.error('Timezone sync failed',error));}catch{if(!navigator.onLine&&localStorage.getItem('zf-owner-email')){state.user=localStorage.getItem('zf-owner-email')??'';state.role=(localStorage.getItem('zf-owner-role') as 'admin'|'user')??'user';await loadOffline();render();}else{state.user='';renderSignIn();}}}
+async function bootstrap():Promise<void>{try{await csrf();const me=await api<{user:{email:string;role:'admin'|'user'}}>('/api/v1/auth/me');state.user=me.user.email;state.role=me.user.role;localStorage.setItem('zf-owner-email',state.user);localStorage.setItem('zf-owner-role',state.role);await refreshData();await syncOutbox();void api('/api/v1/settings/timezone',{method:'POST',body:JSON.stringify({timezone:Intl.DateTimeFormat().resolvedOptions().timeZone})}).catch((error:unknown)=>console.error('Timezone sync failed',error));}catch{if(!navigator.onLine&&localStorage.getItem('zf-owner-email')){state.user=localStorage.getItem('zf-owner-email')??'';state.role=(localStorage.getItem('zf-owner-role') as 'admin'|'user')??'user';await loadOffline();render();}else{state.user='';window.location.replace('/signin');}}}
 
 app.addEventListener('click',(event)=>{const target=event.target;if(!(target instanceof Element))return;const button=target.closest<HTMLElement>('[data-action]');if(button)void handleAction(button);const nav=target.closest<HTMLElement>('[data-view]');if(nav){state.view=nav.dataset.view??'dashboard';state.search='';if(state.view==='admin'&&state.role==='admin')void loadAdminUsers().then(()=>render()).catch((error:unknown)=>notify((error as Error).message));else{render();if(state.view!=='settings')void refreshData();}}});
 app.addEventListener('submit',(event)=>{if(!(event.target instanceof HTMLFormElement))return;event.preventDefault();void handleSubmit(event.target);});
@@ -595,9 +589,4 @@ if('serviceWorker'in navigator){
   }).catch((error:unknown)=>console.error('Service worker registration failed',error));
 }
 
-async function initializePlanner(): Promise<void> {
-  await consumeMagicLink();
-  if (!new URL(location.href).searchParams.has('token')) await bootstrap();
-}
-
-void initializePlanner();
+void bootstrap();

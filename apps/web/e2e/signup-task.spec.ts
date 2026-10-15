@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('a new user can sign up and create a task', async ({ page }) => {
+test('a new user can sign in with OTP and create persistent tasks and meetings', async ({ page }) => {
   test.setTimeout(45_000);
   const email = `smoke-${Date.now()}@example.test`;
   const taskTitle = `Playwright task ${Date.now()}`;
@@ -8,11 +8,21 @@ test('a new user can sign up and create a task', async ({ page }) => {
   await page.route('**/service-worker.js*', (route) => route.abort());
   await page.goto('/signin');
   await page.getByLabel('Email address').fill(email);
-  await page.getByRole('button', { name: 'Email me a secure link' }).click();
+  await page.getByRole('button', { name: 'Send me a sign-in code' }).click();
+  await expect(page.getByLabel('6-digit code')).toBeVisible();
 
-  const developmentLink = page.getByRole('link', { name: 'Continue using the local sign-in link' });
-  await expect(developmentLink).toBeVisible({ timeout: 20_000 });
-  await developmentLink.click();
+  let otp = '';
+  await expect.poll(async () => {
+    const response = await page.request.get(`http://127.0.0.1:3002/latest-code?email=${encodeURIComponent(email)}`);
+    if (!response.ok()) return '';
+    otp = (await response.json() as { code: string }).code;
+    return otp;
+  }, { timeout: 20_000 }).toMatch(/^\d{6}$/);
+  const [verified] = await Promise.all([
+    page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/auth/verify')),
+    page.getByLabel('6-digit code').fill(otp)
+  ]);
+  expect(verified.status()).toBe(200);
   await expect(page).toHaveURL(/\/planner$/);
   await expect(page.locator('.offline')).toHaveText('Synced');
   await page.waitForLoadState('networkidle');

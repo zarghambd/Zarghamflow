@@ -15,26 +15,34 @@ export default defineConfig({
     browserName: 'chromium',
     headless: true
   },
-  webServer: {
-    command: 'npm run dev --workspace @zarghamflow/web',
-    url: `${baseURL}/api/health`,
-    timeout: 120_000,
-    reuseExistingServer: false,
-    env: {
-      APP_URL: baseURL,
-      ADMIN_EMAIL: 'e2e-admin@example.test',
-      DATABASE_PATH: databasePath,
-      DATABASE_URL: '',
-      LOGIN_SECRET: 'playwright-login-secret-0123456789abcdef',
-      NODE_ENV: 'development',
-      RESEND_API_KEY: '',
-      SMTP_HOST: '127.0.0.1',
-      SMTP_PASS: '',
-      SMTP_PORT: '1',
-      SMTP_USER: '',
-      TRUST_PROXY: 'true',
-      ZF_DISABLE_DOTENV: '1',
-      ZF_NEXT_DIST_DIR: '.next-e2e'
+  webServer: [
+    {
+      command: 'node e2e/mail-sink.mjs',
+      url: 'http://127.0.0.1:3002/health',
+      timeout: 10_000,
+      reuseExistingServer: false
+    },
+    {
+      command: 'npm run dev --workspace @zarghamflow/web',
+      url: `${baseURL}/api/health`,
+      timeout: 120_000,
+      reuseExistingServer: false,
+      env: {
+        APP_URL: baseURL,
+        ADMIN_EMAIL: 'e2e-admin@example.test',
+        DATABASE_PATH: databasePath,
+        DATABASE_URL: '',
+        LOGIN_SECRET: 'playwright-login-secret-0123456789abcdef',
+        NODE_ENV: 'development',
+        RESEND_API_KEY: '',
+        SMTP_HOST: '127.0.0.1',
+        SMTP_PASS: '',
+        SMTP_PORT: '1026',
+        SMTP_USER: '',
+        TRUST_PROXY: 'true',
+        ZF_DISABLE_DOTENV: '1',
+        ZF_NEXT_DIST_DIR: '.next-e2e'
+      }
     }
-  }
+  ]
 });

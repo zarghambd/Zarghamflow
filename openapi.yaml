@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: ZarghamFlow API
   version: 1.0.0
-  description: Single-owner meeting and task planner API. Mutations require the zf_csrf cookie and X-CSRF-Token header.
+  description: Multi-user meeting and task planner API. Mutations require the zf_csrf cookie and X-CSRF-Token header.
 servers:
   - url: /api/v1
 paths:
@@ -12,16 +12,79 @@ paths:
       responses: {'200': {description: CSRF token}}
   /auth/request:
     post:
-      summary: Request owner magic link (generic response for every address)
-      responses: {'200': {description: Generic sign-in response}}
+      summary: Request a sign-in code (alias of signup)
+      description: Requires the zf_csrf cookie and X-CSRF-Token header. The response is generic for every email address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OtpRequest'}
+      responses:
+        '200':
+          description: Generic code-request response
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OtpRequestResponse'}
+        '429':
+          description: Send limit or resend cooldown reached
+          headers:
+            Retry-After: {description: Seconds until another request is accepted, schema: {type: integer, minimum: 1}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApiError'}
+  /auth/signup:
+    post:
+      summary: Request a sign-in code
+      description: Signup and login share this flow. Requires the zf_csrf cookie and X-CSRF-Token header.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OtpRequest'}
+      responses:
+        '200':
+          description: Generic response independent of whether the address exists
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OtpRequestResponse'}
+        '429':
+          description: Send limit or resend cooldown reached
+          headers:
+            Retry-After: {description: Seconds until another request is accepted, schema: {type: integer, minimum: 1}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApiError'}
   /auth/verify:
     post:
-      summary: Consume a single-use sign-in token and rotate the session
-      responses: {'200': {description: Signed in}, '400': {description: Invalid or expired token}}
+      summary: Verify a 6-digit code and create or rotate a session
+      description: Requires the zf_csrf cookie and X-CSRF-Token header. Codes expire after 10 minutes and are single-use.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OtpVerify'}
+      responses:
+        '200':
+          description: Signed in; includes the current user and redirects to the planner
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OtpVerifyResponse'}
+        '400':
+          description: Invalid, expired, or deactivated-account code
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApiError'}
+        '429':
+          description: Verification rate limit or code attempt lock reached
+          headers:
+            Retry-After: {description: Seconds until another request is accepted, schema: {type: integer, minimum: 1}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApiError'}
   /auth/me:
     get:
       security: [{cookieAuth: []}]
-      responses: {'200': {description: Current owner}}
+      responses: {'200': {description: Current user}}
   /meetings:
     get:
       security: [{cookieAuth: []}]
@@ -107,6 +170,46 @@ paths:
       security: [{cookieAuth: []}]
       responses: {'200': {description: iCalendar export}}
 components:
+  schemas:
+    OtpRequest:
+      type: object
+      required: [email]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+    OtpVerify:
+      type: object
+      required: [email, code]
+      properties:
+        email: {type: string, format: email, maxLength: 254}
+        code: {type: string, pattern: '^\d{6}$'}
+    OtpRequestResponse:
+      type: object
+      required: [ok, message]
+      properties:
+        ok: {type: boolean, const: true}
+        message: {type: string}
+    OtpVerifyResponse:
+      type: object
+      required: [ok, user, redirect]
+      properties:
+        ok: {type: boolean, const: true}
+        user:
+          type: object
+          required: [email, role]
+          properties:
+            email: {type: string, format: email}
+            role: {type: string, enum: [admin, user]}
+        redirect: {type: string, enum: [/admin, /planner]}
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
   securitySchemes:
     cookieAuth: {type: apiKey, in: cookie, name: zf_session}
     csrf: {type: apiKey, in: header, name: X-CSRF-Token}

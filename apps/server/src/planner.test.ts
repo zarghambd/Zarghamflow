@@ -45,13 +45,13 @@ async function createUser(email: string): Promise<UserContext> {
   });
   if (requested.statusCode !== 200) throw new Error(`Signup failed: ${requested.statusCode}`);
   const messages = takeTestMails();
-  const rawToken = /[?&]token=([A-Za-z0-9_-]+)/.exec(messages[0]?.text ?? '')?.[1];
-  if (!rawToken) throw new Error('Magic-link token not found in test email');
+  const code = /Your ZarghamFlow code is (\d{6})/.exec(messages[0]?.text ?? '')?.[1];
+  if (!code) throw new Error('OTP not found in test email');
   const verified = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/verify',
     headers: { cookie: csrf.cookie, 'x-csrf-token': csrf.token, 'x-forwarded-for': ip },
-    payload: { token: rawToken }
+    payload: { email, code }
   });
   if (verified.statusCode !== 200) throw new Error(`Verification failed: ${verified.statusCode}`);
   const session = setCookies(verified).find((value) => value.startsWith('zf_session='));
@@ -118,7 +118,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  sqlite.exec(`DELETE FROM reminders; DELETE FROM push_subscriptions; DELETE FROM sessions; DELETE FROM login_tokens;
+  sqlite.exec(`DELETE FROM reminders; DELETE FROM push_subscriptions; DELETE FROM sessions; DELETE FROM auth_otps; DELETE FROM login_tokens;
     DELETE FROM auth_rate_limits; DELETE FROM audit_log; DELETE FROM tasks; DELETE FROM meetings;
     DELETE FROM reminder_prefs; DELETE FROM users;`);
   takeTestMails();

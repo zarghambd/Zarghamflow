@@ -71,7 +71,7 @@ export function clearCsrfCookie() {
 }
 
 export function makeGenericResponse() {
-  return NextResponse.json({ ok: true, message: 'If the address is eligible, a sign-in link will arrive shortly.' });
+  return NextResponse.json({ ok: true, message: 'If the address is eligible, a sign-in code will arrive shortly.' });
 }
 
 export function isValidEmail(value: string): boolean {

@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { dbTransaction, initializeDatabase, isPostgres, sqlite } from './index.js';
 
-const sqliteMigrations = ['0001_initial.sql', '0002_multi_user.sql', '0003_email_otp.sql', '0004_restore_magic_links.sql', '0005_auth_rate_limits.sql'];
-const postgresMigrations = ['0001_postgres.sql', '0002_auth_rate_limits.sql'];
+const sqliteMigrations = ['0001_initial.sql', '0002_multi_user.sql', '0003_email_otp.sql', '0004_restore_magic_links.sql', '0005_auth_rate_limits.sql', '0006_auth_otps.sql'];
+const postgresMigrations = ['0001_postgres.sql', '0002_auth_rate_limits.sql', '0003_auth_otps.sql'];
 const migrationDirectories = [
   resolve(process.cwd(), 'migrations'),
   resolve(process.cwd(), '../../apps/server/migrations'),

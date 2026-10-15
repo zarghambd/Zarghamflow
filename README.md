@@ -1,6 +1,6 @@
 # ZarghamFlow
 
-ZarghamFlow is a multi-user meeting and task planner with email-verified signup and administrator-managed accounts. The production app is a Next.js application with API route handlers, Neon/PostgreSQL, email magic links, reminders, Web Push, and an offline IndexedDB outbox. SQLite remains available for local development. The original `index.html` remains in the repository as the legacy app and localStorage backup reference.
+ZarghamFlow is a multi-user meeting and task planner with email-verified signup and administrator-managed accounts. The production app is a Next.js application with API route handlers, Neon/PostgreSQL, email one-time passcodes (OTPs), reminders, Web Push, and an offline IndexedDB outbox. SQLite remains available for local development. The original `index.html` remains in the repository as the legacy app and localStorage backup reference.
 
 **Stack choice:** Node 22, Next.js, Zod, SQLite for local development, Neon/PostgreSQL for Vercel, Nodemailer/Resend SMTP, and Web Push.
 
@@ -18,10 +18,14 @@ ZarghamFlow is a multi-user meeting and task planner with email-verified signup 
 Prerequisites: Node.js 20+ (Node 22 recommended) and npm.
 
 1. Copy `.env.example` to `.env` and set `ADMIN_EMAIL` and a random `LOGIN_SECRET` of at least 32 characters. Anyone can create an account by verifying their email; only the designated admin address receives administrator privileges automatically. The first verified user becomes admin only in development/test when `ADMIN_EMAIL` is omitted.
-2. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` for a mail provider. For local development, if mail delivery is unavailable, development mode displays a one-time sign-in link instead.
+2. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS` for a mail provider. If local development email delivery fails, the server logs the one-time code to its console; the code is never included in the browser response.
 3. Run `npm ci`.
 4. Run `npm run dev`. The app and API are both available at `http://127.0.0.1:3001`; health is at `/api/health`.
-5. Open the app, enter an email address, and follow the emailed verification link. The matching `ADMIN_EMAIL` user becomes admin. In production, startup fails unless `ADMIN_EMAIL` is configured; never rely on first-user bootstrap there. Admins can manage roles and disable accounts from the **Users** tab.
+5. Open the app, enter an email address, and enter the 6-digit code sent by email. The code expires after 10 minutes, is single-use, and can be resent after 60 seconds. The matching `ADMIN_EMAIL` user becomes admin. In production, startup fails unless `ADMIN_EMAIL` is configured; never rely on first-user bootstrap there. Admins can manage roles and disable accounts from the **Users** tab.
+
+Authentication API: call `GET /api/v1/auth/csrf` first, then `POST /api/v1/auth/signup` (or `/api/v1/auth/request`) with `{ "email": "..." }`. Both send and verification requests require the returned `zf_csrf` cookie and `X-CSRF-Token` header. Verify with `POST /api/v1/auth/verify` and `{ "email": "...", "code": "123456" }`. Signup always returns the same generic success response for eligible, unknown, and deactivated addresses; rate limits return `429` with `Retry-After`.
+
+Codes are cryptographically generated, HMAC-SHA256 hashed at rest, single-use, and expire after 10 minutes. A code is invalidated after five incorrect attempts; a new request invalidates prior codes and is allowed once per email every 60 seconds, with at most five sends per email per hour. Send and verify requests are also rate-limited per IP and email using keyed hashes.
 
 Database migrations are applied when the API is first used. For explicit migration, run `npm run db:migrate`. Use `npm run db:seed` only in development/test mode to add sample records.
 
@@ -37,8 +41,8 @@ To copy a current ZarghamFlow SQLite database into PostgreSQL, set `DATABASE_URL
 | `DATABASE_URL` | PostgreSQL connection URL for Neon deployments | Unset for local SQLite |
 | `ADMIN_EMAIL` | Designated initial administrator email | Required in production and on Vercel; optional only in development/test |
 | `OWNER_EMAIL` | Legacy compatibility email; no longer restricts signup | Optional |
-| `APP_URL` | Public app origin for sign-in/action links | `http://127.0.0.1:3001` |
-| `LOGIN_SECRET` | HMAC key used to hash client IPs for authentication/rate-limiting records | Required, 32+ random chars |
+| `APP_URL` | Public app origin for action links; OTP sign-in is same-origin | `http://127.0.0.1:3001` |
+| `LOGIN_SECRET` | HMAC key for OTP hashes and authentication/rate-limit IP hashes | Required, 32+ random chars |
 | `CRON_SECRET` | Bearer token protecting scheduled reminder processing | Required when enabling reminders on Vercel |
 | `SMTP_HOST`, `SMTP_PORT` | SMTP endpoint | `127.0.0.1`, `1025` locally; `smtp.gmail.com`, `465` for Google Workspace |
 | `SMTP_USER`, `SMTP_PASS` | SMTP account and app password | Optional locally; Google Workspace requires an App Password |
@@ -60,14 +64,14 @@ Use one Vercel project for the Next.js app and its API routes. Set the **Framewo
 1. Create a Neon project and copy its pooled PostgreSQL connection string. Keep it private; do not paste it into source control or chat.
 2. In the Vercel project, select Node.js 22 and set Production environment variables:
    - `DATABASE_URL`: the Neon pooled PostgreSQL connection string.
-   - `APP_URL`: the exact public HTTPS origin used for magic-link callback URLs, for example `https://www.example.com`.
+   - `APP_URL`: the exact public HTTPS origin used for action links, for example `https://www.example.com`. OTP sign-in is same-origin and does not depend on this URL.
    - `LOGIN_SECRET`: a random value of at least 32 characters.
    - Email delivery: either `RESEND_API_KEY` and `RESEND_FROM`, or `SMTP_HOST` and `SMTP_PORT`, with `SMTP_USER` and `SMTP_PASS` both set when the provider requires authentication; set `SMTP_FROM` to an authorized sender address.
    - `ADMIN_EMAIL` is required and selects the designated initial administrator. `CRON_SECRET` is needed only for scheduled reminder processing. `TRUST_PROXY` can be set to `true` when proxy-derived client IPs are desired.
 
    Vercel provides `VERCEL=1`; the server validates the required database, callback origin, secrets, and email provider configuration in production. Do not set `DATABASE_PATH`, `HOST`, or `PORT`. Do not put credentials in `NEXT_PUBLIC_*` variables.
 3. Configure email using either Resend or SMTP as described above. Use a newly generated provider app password and a sender address authorized by that provider.
-4. Deploy the project. The first API request applies the PostgreSQL schema migrations automatically. Verify `/api/health`, then request a new sign-in link from the public app. The included Vercel Cron calls `/api/cron/reminders` every minute and authenticates using a constant-time comparison against `CRON_SECRET`; this per-minute schedule requires Vercel Pro or higher. Set the same high-entropy `CRON_SECRET` in the Vercel environment before enabling the cron.
+4. Deploy the project. The first API request applies the PostgreSQL schema migrations automatically. Verify `/api/health`, then request a new sign-in code from the public app. The included Vercel Cron calls `/api/cron/reminders` every minute and authenticates using a constant-time comparison against `CRON_SECRET`; this per-minute schedule requires Vercel Pro or higher. Set the same high-entropy `CRON_SECRET` in the Vercel environment before enabling the cron.
 5. Add Preview variables only if Preview deployments should connect to a database. Do not point Preview at Production unless intentional.
 
 The first API startup against a new Neon database creates an empty schema. No production SQLite file or export was available during this setup, so existing live records have not been migrated. Keep the old deployment untouched and do not treat the new database as a data-preserving cutover until those records have been recovered and imported. Vercel Functions do not keep an in-memory reminder worker alive; the scheduled route is the reminder worker for Vercel. For self-hosting, configure an external scheduler to call the same protected route once per minute.
@@ -125,10 +129,10 @@ The worker claims due rows transactionally (`pending` → `processing`), records
 - `npm run build`
 - `npm run audit`
 
-CI runs lint, typecheck, unit tests, build, and production dependency audit. Automated tests cover generic signup responses, CSRF, token expiry/reuse, multiple sessions, global sign-out, auth rate limits, first-admin bootstrap, regular-user access denial, admin deactivation, and last-admin protection; reminder tests cover timezone/DST and quiet-hours, rescheduling/deduplication, retry recovery, date-only timing, and ICS attachments. Full planner API coverage, provider-backed delivery, browser E2E, and measured Lighthouse 90+ acceptance still require additional tests and configured infrastructure.
+CI runs lint, typecheck, unit tests, build, and production dependency audit. Automated tests cover OTP generation/normalization, HMAC-at-rest, expiry, single use, lockout, resend invalidation, generic responses, CSRF, rate limits, session rotation/logout-all, designated and development admin bootstrap, regular-user access denial, admin deactivation, and last-admin protection. Planner API and Playwright tests cover signup through persistent task/meeting creation and offline retry/discard; the browser test uses a local SMTP sink. Reminder tests cover timezone/DST and quiet-hours, rescheduling/deduplication, retry recovery, date-only timing, and ICS attachments.
 
 ## Requirement Coverage / Outstanding Configuration
 
-Implemented in this repository: verified-email signup, role-aware sessions, admin user list/role/activation management, hashed one-use tokens and sessions, CSRF, security headers, SQLite schema and migrations, planner API and import/export, local IndexedDB/outbox, installable manifest/service worker, SMTP/Resend transport, VAPID push delivery, persistent reminder rows/retries, reminder preferences/log, action links, Compose/Caddy, backups, CI, and documented setup.
+Implemented in this repository: verified-email OTP signup, role-aware sessions, admin user list/role/activation management, hashed one-time codes and sessions, CSRF, security headers, SQLite/PostgreSQL schema migrations, planner API and import/export, local IndexedDB/outbox, installable manifest/service worker, SMTP/Resend transport, VAPID push delivery, persistent reminder rows/retries, reminder preferences/log, action links, Compose/Caddy, backups, CI, and documented setup.
 
-Configure manually: designated admin email and secrets, SMTP/Resend credentials, public domain/DNS/HTTPS, verified email sender with SPF/DKIM/DMARC, VAPID keys, Docker on the host, and off-site encrypted backup destination. Not implemented yet: Google OIDC/passkeys, optional Google Calendar OAuth/two-way sync, comprehensive planner API tests, Playwright E2E, and measured Lighthouse 90+ scores. Do not treat those items as production-complete until implemented and tested.
+Configure manually: designated admin email and secrets, SMTP/Resend credentials, public domain/DNS/HTTPS, verified email sender with SPF/DKIM/DMARC, VAPID keys, Docker on the host, and off-site encrypted backup destination. Not implemented yet: Google OIDC/passkeys, optional Google Calendar OAuth/two-way sync, and measured Lighthouse 90+ scores. Neon/Vercel and production email delivery still need verification using deployment credentials and a verified sender domain.

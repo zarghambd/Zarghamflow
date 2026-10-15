@@ -66,8 +66,9 @@ export const reminderPrefsSchema = z.object({
   pushEnabled: z.boolean().default(true)
 });
 
-export const loginRequestSchema = z.object({ email: z.string().email().max(254) });
-export const loginVerifySchema = z.object({ token: z.string().min(24).max(256) });
+const normalizedEmail = z.string().trim().toLowerCase().max(254).email();
+export const OtpRequestSchema = z.object({ email: normalizedEmail });
+export const OtpVerifySchema = z.object({ email: normalizedEmail, code: z.string().regex(/^\d{6}$/) });
 export const paginationSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).default(0) });
 export const importSchema = z.object({ mode: z.enum(['merge', 'replace']), data: z.object({ meetings: z.array(z.unknown()).default([]), tasks: z.array(z.unknown()).default([]) }) });
 

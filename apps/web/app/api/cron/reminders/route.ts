@@ -1,4 +1,5 @@
 import { runReminderTick } from '../../../../../server/dist/reminders/scheduler.js';
+import { cleanupExpiredOtps } from '../../../../../server/dist/auth.js';
 import { safeEqual } from '../../../../../server/dist/security.js';
 import { applyMigrations } from '../../../../../server/dist/db/migrations.js';
 
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
   }
 
   await applyMigrations();
+  await cleanupExpiredOtps();
   await runReminderTick();
   return Response.json({ ok: true });
 }

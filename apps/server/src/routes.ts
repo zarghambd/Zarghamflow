@@ -3,6 +3,7 @@ import {
   importSchema, meetingInputSchema, paginationSchema, reminderPrefsSchema, taskInputSchema
 } from '@zarghamflow/shared';
 import { DateTime } from 'luxon';
+import type { ZodIssue } from 'zod';
 import { dbAll, dbGet, dbRun, dbTransaction } from './db/index.js';
 import { meetings, tasks } from './db/schema.js';
 import { schedulerHeartbeat, scheduleEntityReminders } from './reminders/scheduler.js';
@@ -13,6 +14,13 @@ import type { ApiApp, ApiRequest } from './http-types.js';
 
 const nowIso = (): string => new Date().toISOString();
 const failure = (code: string, message: string) => ({ error: { code, message } });
+const validationFailure = (issues: ZodIssue[]) => ({
+  error: {
+    code: 'VALIDATION_ERROR',
+    message: 'Please correct the highlighted fields.',
+    fields: issues.map((issue) => ({ path: issue.path.map(String), message: issue.message }))
+  }
+});
 function owner(request: ApiRequest): { id: string; email: string; role: 'admin'|'user' } {
   if (!request.owner) throw Object.assign(new Error('Sign in required.'), { statusCode: 401, code: 'UNAUTHORIZED' });
   return request.owner;
@@ -163,7 +171,7 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
 
   app.post('/api/v1/meetings', async (request, reply) => {
     const user = owner(request), parsed = meetingInputSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(failure('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid meeting.'));
+    if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     const row = createMeetingRecord(parsed.data as Record<string, unknown>, user.id);
     await insertMeeting(row);
     const account = await dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]);
@@ -185,12 +193,12 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const expectedVersion = Number(request.headers['if-match']);
     if (Number.isInteger(expectedVersion) && expectedVersion !== existing.version) return reply.code(409).send(failure('VERSION_CONFLICT', 'This meeting changed on another device. Refresh before applying your edit.'));
     const parsed = meetingInputSchema.partial().safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(failure('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid meeting.'));
+    if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     const currentLeads = existing.reminderLeadJson ? JSON.parse(existing.reminderLeadJson) as number[] | null : undefined;
     const leads = Object.hasOwn(parsed.data, 'reminderLeadMinutes') ? parsed.data.reminderLeadMinutes : currentLeads;
     const row = { ...existing, ...parsed.data, reminderLeadMinutes: leads, updatedAt: nowIso(), version: existing.version + 1 };
     const checked = meetingInputSchema.safeParse(row);
-    if (!checked.success) return reply.code(400).send(failure('VALIDATION_ERROR', checked.error.issues[0]?.message ?? 'Invalid meeting.'));
+    if (!checked.success) return reply.code(400).send(validationFailure(checked.error.issues));
     const reminderLeadJson = leads === undefined ? existing.reminderLeadJson : leads === null ? 'null' : JSON.stringify(leads);
     await dbRun(`UPDATE meetings SET title=?,date=?,start=?,"end"=?,client=?,contacts=?,type=?,location=?,notes=?,outcome=?,status=?,follow_up_date=?,reminder_lead_json=?,updated_at=?,version=? WHERE id=? AND user_id=?`,
       [checked.data.title,checked.data.date,checked.data.start,checked.data.end,checked.data.client,checked.data.contacts,checked.data.type,checked.data.location,checked.data.notes,checked.data.outcome,checked.data.status,checked.data.followUpDate,reminderLeadJson,row.updatedAt,row.version,id,user.id]);
@@ -249,7 +257,7 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
 
   app.post('/api/v1/tasks', async (request, reply) => {
     const user = owner(request), parsed = taskInputSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(failure('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid task.'));
+    if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     if (!await ownsMeeting(user.id, parsed.data.meetingId)) return reply.code(400).send(failure('INVALID_MEETING', 'Related meeting is not available to this account.'));
     const row = createTaskRecord(parsed.data as Record<string, unknown>, user.id);
     await insertTask(row);
@@ -266,13 +274,13 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const expectedVersion = Number(request.headers['if-match']);
     if (Number.isInteger(expectedVersion) && expectedVersion !== existing.version) return reply.code(409).send(failure('VERSION_CONFLICT', 'This task changed on another device. Refresh before applying your edit.'));
     const parsed = taskInputSchema.partial().safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send(failure('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid task.'));
+    if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     const currentLeads = existing.reminderLeadJson ? JSON.parse(existing.reminderLeadJson) as number[] | null : undefined;
     const leads = Object.hasOwn(parsed.data, 'reminderLeadMinutes') ? parsed.data.reminderLeadMinutes : currentLeads;
     const row = { ...existing, ...parsed.data, reminderLeadMinutes: leads, updatedAt: nowIso(), version: existing.version + 1 };
     if (!await ownsMeeting(user.id, row.meetingId)) return reply.code(400).send(failure('INVALID_MEETING', 'Related meeting is not available to this account.'));
     const checked = taskInputSchema.safeParse(row);
-    if (!checked.success) return reply.code(400).send(failure('VALIDATION_ERROR', checked.error.issues[0]?.message ?? 'Invalid task.'));
+    if (!checked.success) return reply.code(400).send(validationFailure(checked.error.issues));
     const reminderLeadJson = leads === undefined ? existing.reminderLeadJson : leads === null ? 'null' : JSON.stringify(leads);
     await dbRun('UPDATE tasks SET title=?,due_date=?,due_time=?,priority=?,status=?,category=?,client=?,meeting_id=?,notes=?,completed_at=?,reminder_lead_json=?,updated_at=?,version=? WHERE id=? AND user_id=?',
       [checked.data.title,checked.data.dueDate,checked.data.dueTime,checked.data.priority,checked.data.status,checked.data.category,checked.data.client,checked.data.meetingId,checked.data.notes,checked.data.completedAt,reminderLeadJson,row.updatedAt,row.version,id,user.id]);
@@ -324,7 +332,7 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     });
     title = title.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\b/, (_all, h: string, m: string) => { dueTime = `${h.padStart(2, '0')}:${m}`; return ''; }).replace(/\s+/g, ' ').trim();
     const parsed = taskInputSchema.safeParse({ title, dueDate, dueTime, priority, status: 'To Do', category, client: '', meetingId: null, notes: '', completedAt: null });
-    if (!parsed.success) return reply.code(400).send(failure('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Could not parse task.'));
+    if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     const row = createTaskRecord(parsed.data as Record<string, unknown>, user.id);
     await insertTask(row);
     return reply.code(201).send({ item: row });

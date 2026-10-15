@@ -7,7 +7,7 @@ import './taskora-theme.css';
 type Meeting = { id: string; title: string; date: string; start: string; end: string; client: string; contacts: string; type: string; location: string; notes: string; outcome: string; status: string; followUpDate: string | null; version: number; updatedAt: string };
 type Task = { id: string; title: string; dueDate: string; dueTime: string | null; priority: string; status: string; category: string; client: string; meetingId: string | null; notes: string; version: number; updatedAt: string };
 type Page<T> = { items: T[]; total: number; limit: number; offset: number };
-type OutboxItem = { id: string; method: 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; recordId: string; entity: 'meeting' | 'task'; createdAt: string; baseVersion?: number };
+type OutboxItem = { id: string; method: 'POST' | 'PATCH' | 'DELETE'; url: string; body?: unknown; recordId: string; entity: 'meeting' | 'task'; createdAt: string; baseVersion?: number; previousRecord?: CachedRecord };
 type CachedRecord = (Meeting & { kind: 'meeting' }) | (Task & { kind: 'task' });
 type ConflictItem = OutboxItem;
 interface OfflineDb extends DBSchema {
@@ -30,7 +30,7 @@ const offlineDbPromise = openDB<OfflineDb>('zarghamflow-offline-v1', 1, {
     }
   }
 });
-const state = { view: 'dashboard', user: '', role: 'user', adminUsers: [] as Array<Record<string, unknown>>, meetings: [] as Meeting[], tasks: [] as Task[], search: '', date: DateTime.local().toISODate() ?? '', range: 'all', status: 'all', client: '', type: '', priority: '', category: '', csrf: '', prefs: null as ReminderPrefs | null, sessions: [] as Array<Record<string, unknown>>, reminders: [] as Array<Record<string, unknown>>, online: navigator.onLine, pending: 0, installPrompt: null as BeforeInstallPromptEvent | null, updateAvailable: false, conflicts: [] as string[] };
+const state = { view: 'dashboard', user: '', role: 'user', adminUsers: [] as Array<Record<string, unknown>>, meetings: [] as Meeting[], tasks: [] as Task[], search: '', date: DateTime.local().toISODate() ?? '', range: 'all', status: 'all', client: '', type: '', priority: '', category: '', csrf: '', prefs: null as ReminderPrefs | null, sessions: [] as Array<Record<string, unknown>>, reminders: [] as Array<Record<string, unknown>>, online: navigator.onLine, pending: 0, syncError: null as { item: OutboxItem; message: string } | null, installPrompt: null as BeforeInstallPromptEvent | null, updateAvailable: false, conflicts: [] as string[] };
 type BeforeInstallPromptEvent = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
 let waitingWorker: ServiceWorker | null = null;
 
@@ -71,10 +71,13 @@ async function api<T>(url: string, options: RequestInit = {}): Promise<T> {
     }
   }
   const payload = typeof data === 'object' && data !== null
-    ? data as { error?: { message?: string; code?: string }; developmentLink?: unknown }
+    ? data as { error?: { message?: string; code?: string; fields?: Array<{ path: string[]; message: string }> }; developmentLink?: unknown }
     : undefined;
   if (!response.ok) {
-    const message = payload?.error?.message ?? (text && data === undefined ? text : `Request failed (${response.status})`);
+    const fieldMessages = payload?.error?.fields?.map((field) => `${field.path.join('.') || 'Form'}: ${field.message}`);
+    const message = fieldMessages?.length
+      ? fieldMessages.join('; ')
+      : payload?.error?.message ?? (text && data === undefined ? text : `Request failed (${response.status})`);
     const error: ApiError = new Error(message);
     error.status = response.status;
     if (payload?.error?.code) error.code = payload.error.code;
@@ -117,6 +120,8 @@ async function queueOffline(item: OutboxItem, record: Meeting | Task): Promise<v
   await tx.objectStore('records').put({ ...record, kind: item.entity } as CachedRecord);
   await tx.objectStore('outbox').put(item);
   await tx.done;
+  if (item.entity === 'meeting') state.meetings = [...state.meetings.filter((existing) => existing.id !== record.id), record as Meeting];
+  else state.tasks = [...state.tasks.filter((existing) => existing.id !== record.id), record as Task];
   state.pending = await db.count('outbox');
   render();
 }
@@ -141,7 +146,7 @@ async function refreshData(): Promise<void> {
 async function queueOfflineDelete(kind: 'meeting'|'task', id: string): Promise<void> {
   const db = await offlineDbPromise;
   const record = existingRecord(kind, id);
-  const item: OutboxItem = { id: crypto.randomUUID(), method: 'DELETE', url: `/api/v1/${kind === 'meeting' ? 'meetings' : 'tasks'}/${id}`, recordId: id, entity: kind, createdAt: new Date().toISOString(), ...(record ? { baseVersion: record.version } : {}) };
+  const item: OutboxItem = { id: crypto.randomUUID(), method: 'DELETE', url: `/api/v1/${kind === 'meeting' ? 'meetings' : 'tasks'}/${id}`, recordId: id, entity: kind, createdAt: new Date().toISOString(), ...(record ? { baseVersion: record.version, previousRecord: { ...record, kind } as CachedRecord } : {}) };
   const tx = db.transaction(['records', 'outbox'], 'readwrite');
   await tx.objectStore('records').delete(id);
   await tx.objectStore('outbox').put(item);
@@ -168,11 +173,41 @@ async function syncOutbox(): Promise<void> {
         await db.delete('outbox', item.id);
         continue;
       }
+      const status = (error as Error & { status?: number }).status;
+      state.syncError = {
+        item,
+        message: status === 401
+          ? 'Sign in again before syncing this saved change.'
+          : `Could not sync this saved change: ${(error as Error).message}`
+      };
       break;
     }
   }
   state.pending = await db.count('outbox');
-  if (state.pending === 0) await refreshData(); else render();
+  if (state.pending === 0) { state.syncError = null; await refreshData(); } else render();
+}
+
+async function discardSyncFailure(): Promise<void> {
+  const failed = state.syncError?.item;
+  if (!failed) return;
+  const db = await offlineDbPromise;
+  const tx = db.transaction(['records', 'outbox'], 'readwrite');
+  if (failed.method === 'POST') await tx.objectStore('records').delete(failed.recordId);
+  else if (failed.previousRecord) await tx.objectStore('records').put(failed.previousRecord);
+  await tx.objectStore('outbox').delete(failed.id);
+  await tx.done;
+  if (failed.method === 'POST') {
+    if (failed.entity === 'meeting') state.meetings = state.meetings.filter((record) => record.id !== failed.recordId);
+    else state.tasks = state.tasks.filter((record) => record.id !== failed.recordId);
+  } else if (failed.previousRecord) {
+    const previous = failed.previousRecord;
+    if (previous.kind === 'meeting') state.meetings = [...state.meetings.filter((record) => record.id !== previous.id), previous];
+    else state.tasks = [...state.tasks.filter((record) => record.id !== previous.id), previous];
+  }
+  state.syncError = null;
+  state.pending = await db.count('outbox');
+  render();
+  notify('The failed local change was discarded.');
 }
 
 async function reapplyConflicts(): Promise<void> {
@@ -190,12 +225,15 @@ async function reapplyConflicts(): Promise<void> {
 }
 
 function shell(content: string): string {
-  const status = !state.online ? 'Offline' : state.pending ? `${state.pending} syncing` : 'Synced';
+  const status = !state.online ? 'Offline' : state.syncError ? 'Sync paused' : state.pending ? `${state.pending} syncing` : 'Synced';
   const conflictBanner = state.conflicts.length
     ? `<div class="banner" role="alert">A record changed on another device while you were offline. Reapply your local edits after reviewing: ${escapeHtml(state.conflicts.join(', '))}<button class="btn" data-action="retry-conflicts">Reapply edits</button><button class="btn" data-action="clear-conflicts">Dismiss</button></div>`
     : '';
+  const syncBanner = state.syncError
+    ? `<div class="banner" role="alert">${escapeHtml(state.syncError.message)}<button class="btn" data-action="retry-sync">Retry sync</button><button class="btn" data-action="discard-sync">Discard local change</button></div>`
+    : '';
   const navItems = [['dashboard','Dashboard'],['meetings','Meetings'],['tasks','Tasks'],...(state.role==='admin'?[['admin','Admin dashboard']]:[])];
-  return `<header class="topbar"><div class="shell"><div class="topbar-row"><div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m8 17 5 5 11-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Taskora</div><div class="row top-actions"><span class="offline ${state.pending || !state.online ? 'pending' : ''}" aria-live="polite">${status}</span><button class="btn primary" data-action="new-meeting">＋ <span class="wide">Meeting</span></button><button class="btn primary" data-action="new-task">＋ <span class="wide">Task</span></button><button class="btn" data-action="settings">Settings</button><button class="icon" data-action="theme" aria-label="Toggle light or dark theme">◐</button><button class="btn ghost" data-action="logout">Sign out</button></div></div><nav class="nav" aria-label="Main navigation">${navItems.map(([id,label])=>`<button class="${state.view===id?'active':''}" data-view="${id}">${label}</button>`).join('')}</nav></div></header><main class="shell">${conflictBanner}${content}</main>${state.installPrompt ? '<button class="btn" data-action="install" style="position:fixed;right:16px;bottom:16px">Install app</button>' : ''}<dialog id="dialog" aria-labelledby="dialog-title"></dialog>`;
+  return `<header class="topbar"><div class="shell"><div class="topbar-row"><div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m8 17 5 5 11-12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Taskora</div><div class="row top-actions"><span class="offline ${state.pending || !state.online ? 'pending' : ''}" aria-live="polite">${status}</span><button class="btn primary" data-action="new-meeting">＋ <span class="wide">Meeting</span></button><button class="btn primary" data-action="new-task">＋ <span class="wide">Task</span></button><button class="btn" data-action="settings">Settings</button><button class="icon" data-action="theme" aria-label="Toggle light or dark theme">◐</button><button class="btn ghost" data-action="logout">Sign out</button></div></div><nav class="nav" aria-label="Main navigation">${navItems.map(([id,label])=>`<button class="${state.view===id?'active':''}" data-view="${id}">${label}</button>`).join('')}</nav></div></header><main class="shell">${conflictBanner}${syncBanner}${content}</main>${state.installPrompt ? '<button class="btn" data-action="install" style="position:fixed;right:16px;bottom:16px">Install app</button>' : ''}<dialog id="dialog" aria-labelledby="dialog-title"></dialog>`;
 }
 /*
   await tx.objectStore('outbox').put(item);
@@ -222,11 +260,14 @@ async function reapplyConflicts(): Promise<void> {
 }
 
 function shell(content: string): string {
-  const status = !state.online ? 'Offline' : state.pending ? `${state.pending} syncing` : 'Synced';
+  const status = !state.online ? 'Offline' : state.syncError ? 'Sync paused' : state.pending ? `${state.pending} syncing` : 'Synced';
   const conflictBanner = state.conflicts.length
     ? `<div class="banner" role="alert">A record changed on another device while you were offline. Reapply your local edits after reviewing: ${escapeHtml(state.conflicts.join(', '))}<button class="btn" data-action="retry-conflicts">Reapply edits</button><button class="btn" data-action="clear-conflicts">Dismiss</button></div>`
     : '';
-  return `<header class="topbar"><div class="shell"><div class="topbar-row"><div class="brand"><span class="logo">Z</span> ZarghamFlow</div><div class="row top-actions"><span class="offline ${state.pending || !state.online ? 'pending' : ''}" aria-live="polite">${status}</span><button class="btn primary" data-action="new-meeting">＋ <span class="wide">Meeting</span></button><button class="btn primary" data-action="new-task">＋ <span class="wide">Task</span></button><button class="btn" data-action="settings">Settings</button><button class="icon" data-action="theme" aria-label="Toggle light or dark theme">◐</button><button class="btn ghost" data-action="logout">Sign out</button></div></div><nav class="nav" aria-label="Main navigation">${[['dashboard','Dashboard'],['meetings','Meetings'],['tasks','Tasks']].map(([id,label])=>`<button class="${state.view===id?'active':''}" data-view="${id}">${label}</button>`).join('')}</nav></div></header><main class="shell">${conflictBanner}${content}</main>${state.installPrompt ? '<button class="btn" data-action="install" style="position:fixed;right:16px;bottom:16px">Install app</button>' : ''}<dialog id="dialog" aria-labelledby="dialog-title"></dialog>`;
+  const syncBanner = state.syncError
+    ? `<div class="banner" role="alert">${escapeHtml(state.syncError.message)}<button class="btn" data-action="retry-sync">Retry sync</button><button class="btn" data-action="discard-sync">Discard local change</button></div>`
+    : '';
+  return `<header class="topbar"><div class="shell"><div class="topbar-row"><div class="brand"><span class="logo">Z</span> ZarghamFlow</div><div class="row top-actions"><span class="offline ${state.pending || !state.online ? 'pending' : ''}" aria-live="polite">${status}</span><button class="btn primary" data-action="new-meeting">＋ <span class="wide">Meeting</span></button><button class="btn primary" data-action="new-task">＋ <span class="wide">Task</span></button><button class="btn" data-action="settings">Settings</button><button class="icon" data-action="theme" aria-label="Toggle light or dark theme">◐</button><button class="btn ghost" data-action="logout">Sign out</button></div></div><nav class="nav" aria-label="Main navigation">${[['dashboard','Dashboard'],['meetings','Meetings'],['tasks','Tasks']].map(([id,label])=>`<button class="${state.view===id?'active':''}" data-view="${id}">${label}</button>`).join('')}</nav></div></header><main class="shell">${conflictBanner}${syncBanner}${content}</main>${state.installPrompt ? '<button class="btn" data-action="install" style="position:fixed;right:16px;bottom:16px">Install app</button>' : ''}<dialog id="dialog" aria-labelledby="dialog-title"></dialog>`;
   await tx.objectStore('outbox').put(item);
   await tx.done;
   state.pending = await db.count('outbox');
@@ -237,6 +278,7 @@ async function syncOutbox(): Promise<void> {
   if (!navigator.onLine) return;
   const db = await offlineDbPromise;
   const queue = await db.getAllFromIndex('outbox', 'by-created');
+  state.syncError = null;
   if (queue.length) { state.pending = queue.length; render(); }
   for (const item of queue) {
     try {
@@ -439,33 +481,41 @@ function existingRecord(kind: 'meeting'|'task', id: string): Meeting|Task|undefi
 }
 function formData(form: HTMLFormElement): Record<string, unknown> {
   const result: Record<string, unknown> = {};
+  const nullableFields = new Set(['followUpDate', 'dueTime', 'meetingId', 'completedAt', 'quietStart', 'quietEnd']);
   for (const [key, value] of new FormData(form).entries()) {
     if (key === 'reminderOverride') {
       if (value === 'none') result.reminderLeadMinutes = null;
       else if (value !== 'default') result.reminderLeadMinutes = String(value).split(',').map(Number);
       continue;
     }
-    result[key] = value || null;
+    result[key] = value === '' && nullableFields.has(key) ? null : value;
   }
   for (const checkbox of form.querySelectorAll<HTMLInputElement>('input[type=checkbox]')) result[checkbox.name] = checkbox.checked;
   return result;
 }
-async function saveRecord(kind: 'meeting'|'task', id: string, input: Record<string, unknown>): Promise<void> {
+async function saveRecord(kind: 'meeting'|'task', id: string, input: Record<string, unknown>): Promise<boolean> {
   const schema = kind==='meeting'?meetingInputSchema:taskInputSchema;
   const clean = schema.safeParse(input);
-  if (!clean.success) { notify(clean.error.issues[0]?.message ?? 'Please check the form.'); return; }
+  if (!clean.success) {
+    const issue = clean.error.issues[0];
+    notify(issue ? `${issue.path.join('.') || 'Form'}: ${issue.message}` : 'Please check the form.');
+    return false;
+  }
   const url = `/api/v1/${kind==='meeting'?'meetings':'tasks'}${id?`/${id}`:''}`;
   const method = id?'PATCH':'POST';
   if (!navigator.onLine) {
-    const now = new Date().toISOString(), record = { ...input, id:id||crypto.randomUUID(), createdAt:now, updatedAt:now, version:1 } as unknown as Meeting|Task;
-    const item: OutboxItem = { id:crypto.randomUUID(), method, url, body:clean.data, recordId:record.id, entity:kind, createdAt:now, ...(id ? {baseVersion:(existingRecord(kind,id)?.version??1)} : {}) };
-    await queueOffline(item,record); notify('Saved offline. It will sync when you reconnect.'); return;
+    const now = new Date().toISOString(), previous = id ? existingRecord(kind, id) : undefined;
+    const record = { ...input, id:id||crypto.randomUUID(), createdAt:now, updatedAt:now, version:previous?.version ?? 1 } as unknown as Meeting|Task;
+    const item: OutboxItem = { id:crypto.randomUUID(), method, url, body:clean.data, recordId:record.id, entity:kind, createdAt:now, ...(previous ? {baseVersion:previous.version, previousRecord:{...previous,kind} as CachedRecord} : {}) };
+    await queueOffline(item,record); notify('Saved offline. It will sync when you reconnect.'); return true;
   }
-  try { await api(url,{method,body:JSON.stringify(clean.data)}); notify(`${kind==='meeting'?'Meeting':'Task'} saved.`); await refreshData(); }
-  catch (error) { notify((error as Error).message); }
+  try { await api(url,{method,body:JSON.stringify(clean.data)}); notify(`${kind==='meeting'?'Meeting':'Task'} saved.`); await refreshData(); return true; }
+  catch (error) { notify((error as Error).message); return false; }
 }
 async function handleAction(element: HTMLElement): Promise<void> {
   const action=element.dataset.action,id=element.dataset.id;
+  if(action==='retry-sync'){await syncOutbox();return;}
+  if(action==='discard-sync'){try{await discardSyncFailure();}catch(error){notify((error as Error).message);}return;}
   if(action==='new-meeting') return openForm('meeting');
   if(action==='new-task') return openForm('task');
   if(action==='edit-meeting'&&id){const row=state.meetings.find(x=>x.id===id);if(row)return openForm('meeting',row);}
@@ -517,7 +567,7 @@ async function enablePush():Promise<void>{
 async function handleSubmit(form:HTMLFormElement):Promise<void>{
   const kind=form.dataset.form;
   if(kind==='signin'){const data=formData(form);try{await api('/api/v1/auth/signup',{method:'POST',body:JSON.stringify(data)});renderSignIn('If the address is eligible, a sign-in link will arrive shortly.');}catch(error){const apiError=error as ApiError;renderSignIn(apiError.message,apiError.developmentLink??'');}return;}
-  if(kind==='record'){const dialog=document.querySelector<HTMLDialogElement>('#dialog');const record=formData(form);const kind=dialog?.dataset.kind as 'meeting'|'task';const id=dialog?.dataset.id??'';if(!kind)return;await saveRecord(kind,id,record);dialog?.close();render();return;}
+  if(kind==='record'){const dialog=document.querySelector<HTMLDialogElement>('#dialog');const record=formData(form);const kind=dialog?.dataset.kind as 'meeting'|'task';const id=dialog?.dataset.id??'';if(!kind)return;if(!await saveRecord(kind,id,record))return;dialog?.close();render();return;}
   if(kind==='quick'){const text=String(formData(form).text??'').trim();if(!text)return;if(!navigator.onLine){const parsed=parseQuickOffline(text);if(!parsed.title){notify('Please enter a task title.');return;}await saveRecord('task','',parsed);return;}try{await api('/api/v1/tasks/quick-add',{method:'POST',body:JSON.stringify({text})});await refreshData();notify('Task added.');}catch(error){notify((error as Error).message);}return;}
   if(kind==='prefs'){const data=formData(form);const numbers=(value:unknown)=>String(value??'').split(',').map(v=>Number(v.trim())).filter(Number.isFinite);try{const prefs=await api<{prefs:ReminderPrefs}>('/api/v1/reminder-preferences',{method:'PUT',body:JSON.stringify({taskLeadMinutes:numbers(data.taskLeadMinutes),meetingLeadMinutes:numbers(data.meetingLeadMinutes),quietStart:data.quietStart,quietEnd:data.quietEnd,emailEnabled:data.emailEnabled,pushEnabled:data.pushEnabled,overdueEnabled:data.overdueEnabled,digestEnabled:data.digestEnabled,digestTime:data.digestTime,followUpEnabled:true})});state.prefs=prefs.prefs;notify('Reminder settings saved.');render();}catch(error){notify((error as Error).message);}return;}
 }

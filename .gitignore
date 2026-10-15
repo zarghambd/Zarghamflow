@@ -2,6 +2,7 @@ node_modules/
 .vercel/
 **/dist/
 apps/web/.next/
+apps/web/.next-e2e/
 apps/web/tsconfig.tsbuildinfo
 .env
 .env.*

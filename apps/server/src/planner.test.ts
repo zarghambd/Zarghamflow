@@ -125,6 +125,54 @@ beforeEach(() => {
 });
 
 describe('planner CRUD', () => {
+  it('signs up, verifies, creates a meeting and task, and lists both records', async () => {
+    const user = await createUser('planner-flow@example.test');
+    const meetingCreated = await inject(user, 'POST', '/api/v1/meetings', {
+      ...meetingInput,
+      title: 'Signup flow meeting',
+      client: '',
+      contacts: '',
+      location: '',
+      notes: '',
+      outcome: '',
+      followUpDate: null
+    });
+    expect(meetingCreated.statusCode).toBe(201);
+    const meeting = (meetingCreated.json() as { item: { id: string; title: string } }).item;
+    const taskCreated = await inject(user, 'POST', '/api/v1/tasks', {
+      ...taskInput,
+      title: 'Signup flow task',
+      client: '',
+      notes: '',
+      meetingId: meeting.id
+    });
+    expect(taskCreated.statusCode).toBe(201);
+
+    expect((await inject(user, 'GET', '/api/v1/meetings')).json()).toMatchObject({
+      total: 1,
+      items: [expect.objectContaining({ id: meeting.id, title: 'Signup flow meeting' })]
+    });
+    expect((await inject(user, 'GET', '/api/v1/tasks')).json()).toMatchObject({
+      total: 1,
+      items: [expect.objectContaining({ title: 'Signup flow task', meeting_id: meeting.id })]
+    });
+  });
+
+  it('returns field paths when meeting or task input is invalid', async () => {
+    const user = await createUser('planner-validation@example.test');
+    const invalidMeeting = await inject(user, 'POST', '/api/v1/meetings', { ...meetingInput, date: 'not-a-date' });
+    const invalidTask = await inject(user, 'POST', '/api/v1/tasks', { ...taskInput, dueDate: 'not-a-date' });
+
+    expect(invalidMeeting.statusCode).toBe(400);
+    expect((invalidMeeting.json() as { error: { fields: Array<{ path: string[] }> } }).error.fields).toContainEqual(
+      expect.objectContaining({ path: ['date'] })
+    );
+    expect(invalidTask.statusCode).toBe(400);
+    expect((invalidTask.json() as { error: { fields: Array<{ path: string[] }> } }).error.fields).toContainEqual(
+      expect.objectContaining({ path: ['dueDate'] })
+    );
+  });
+
   it('creates, reads, updates, conflicts, and deletes meetings and tasks', async () => {
     const user = await createUser('planner@example.test');
 

@@ -33,7 +33,8 @@ export default defineConfig({
       SMTP_PORT: '1',
       SMTP_USER: '',
       TRUST_PROXY: 'true',
-      ZF_DISABLE_DOTENV: '1'
+      ZF_DISABLE_DOTENV: '1',
+      ZF_NEXT_DIST_DIR: '.next-e2e'
     }
   }
 });

@@ -21,6 +21,16 @@ function cookieOptions(secure: boolean) {
   return { path: '/', httpOnly: true, secure, sameSite: 'lax' as const };
 }
 
+function signInUrl(request: ApiRequest): URL {
+  const origin = request.headers.origin;
+  const host = request.headers.host;
+  if (origin && host && /^https?:\/\//i.test(origin)) {
+    const candidate = new URL(origin);
+    if (candidate.host.toLowerCase() === host.toLowerCase()) return new URL('/signin', candidate.origin);
+  }
+  return new URL('/signin', config.APP_URL);
+}
+
 async function recordAuthAttempt(kind: 'signup' | 'verify', ipHash: string, emailHash?: string): Promise<{ limited: boolean; id?: string }> {
   const now = new Date();
   const since = iso(new Date(now.getTime() - AUTH_RATE_WINDOW_MS));
@@ -97,7 +107,7 @@ export function registerAuth(app: ApiApp): void {
     await dbRun('DELETE FROM login_tokens WHERE expires_at < ? OR consumed_at IS NOT NULL', [iso(now)]);
     await dbRun('INSERT INTO login_tokens (id,email,token_hash,kind,expires_at,created_at,ip_hash) VALUES (?,?,?,?,?,?,?)',
       [loginTokenId, email, tokenHash, 'magic_link', iso(new Date(now.getTime() + TEN_MINUTES)), iso(now), ip]);
-    const url = new URL('/signin', config.APP_URL);
+    const url = signInUrl(request);
     url.searchParams.set('token', rawToken);
     try {
       await sendMail(email, 'Your ZarghamFlow sign-in link', `Use this one-time link within 10 minutes to sign in or finish creating your account:\n\n${url.toString()}\n\nIf you did not request it, ignore this message.`,
@@ -108,10 +118,7 @@ export function registerAuth(app: ApiApp): void {
         throw error;
       }
       request.log.error({ err: error }, 'Magic-link email delivery failed; returning a local development link');
-      return reply.code(503).send({
-        error: { code: 'EMAIL_DELIVERY_FAILED', message: 'Email could not be sent because the local mail server is unavailable.' },
-        developmentLink: url.toString()
-      });
+      return reply.send({ ...generic, developmentLink: url.toString() });
     }
     return reply.send(generic);
   };

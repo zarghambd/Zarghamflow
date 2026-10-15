@@ -19,6 +19,6 @@
       "@zarghamflow/shared": ["../../packages/shared/src"]
     }
   },
-  "include": ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", ".next/types/**/*.ts"],
+  "include": ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", ".next/types/**/*.ts", ".next-e2e/types/**/*.ts"],
   "exclude": ["node_modules", "src", "dist"]
 }

@@ -8,6 +8,7 @@ const buildId = `${process.env.VERCEL_GIT_COMMIT_SHA ?? 'local'}-${Date.now().to
 
 const nextConfig = {
   output: 'standalone',
+  distDir: process.env.ZF_NEXT_DIST_DIR ?? '.next',
   generateBuildId: async () => buildId,
   env: { NEXT_PUBLIC_BUILD_ID: buildId },
   reactStrictMode: true,

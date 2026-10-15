@@ -122,6 +122,24 @@ describe('single-owner email authentication', () => {
     expect((verified.json() as { redirect: string }).redirect).toBe('/admin');
   });
 
+  it('uses the matching request origin for sign-in links instead of a stale APP_URL', async () => {
+    const pair = await csrf();
+    const response = await app.inject({
+      method: 'POST',
+      url: 'http://planner.example.test:8080/api/v1/auth/request',
+      headers: {
+        cookie: pair.cookie,
+        'x-csrf-token': pair.token,
+        origin: 'http://planner.example.test:8080',
+        host: 'planner.example.test:8080',
+        'x-forwarded-for': '198.51.100.17'
+      },
+      payload: { email: 'origin@example.test' }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(takeTestMails()[0]?.text).toContain('http://planner.example.test:8080/signin?token=');
+  });
+
   it('returns the same generic response for any signup address', async () => {
     const pair = await csrf();
     const existingToken = await issueTokenFor(ownerEmail, pair);
@@ -142,7 +160,14 @@ describe('single-owner email authentication', () => {
     const signedIn = await verifyToken(token, pair);
     expect(signedIn.statusCode).toBe(200);
     const sessionCookie = setCookies(signedIn).find((value) => value.startsWith('zf_session='));
+    const rawSetCookies = signedIn.headers['set-cookie'];
+    const sessionSetCookie = (Array.isArray(rawSetCookies) ? rawSetCookies : rawSetCookies ? [rawSetCookies] : [])
+      .find((value) => String(value).startsWith('zf_session='));
     expect(sessionCookie).toBeDefined();
+    expect(sessionSetCookie).toContain('Path=/');
+    expect(sessionSetCookie).toContain('HttpOnly');
+    expect(sessionSetCookie).toContain('SameSite=Lax');
+    expect(sessionSetCookie).not.toContain('Secure');
     expect((await verifyToken(token, pair)).statusCode).toBe(400);
     const retry = await app.inject({
       method: 'POST', url: '/api/v1/auth/verify',

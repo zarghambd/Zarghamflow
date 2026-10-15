@@ -88,6 +88,7 @@ export default function SignInPage() {
       });
       const data = await readApiResponse(response);
       setMessage(typeof data.message === 'string' ? data.message : 'If the address is eligible, a sign-in link will arrive shortly.');
+      setDevelopmentLink(typeof data.developmentLink === 'string' ? data.developmentLink : '');
     } catch (requestError) {
       setError((requestError as Error).message);
       if (requestError instanceof ApiResponseError) setDevelopmentLink(requestError.developmentLink ?? '');

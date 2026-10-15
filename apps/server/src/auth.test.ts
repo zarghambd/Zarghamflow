@@ -12,6 +12,7 @@ const testDir = mkdtempSync(join(tmpdir(), 'zarghamflow-auth-'));
 process.env.NODE_ENV = 'test';
 process.env.OWNER_EMAIL = ownerEmail;
 process.env.APP_URL = 'http://127.0.0.1:3001';
+process.env.TRUST_PROXY = 'true';
 process.env.DATABASE_PATH = join(testDir, 'auth.sqlite');
 delete process.env.DATABASE_URL;
 process.env.LOGIN_SECRET = 'auth-test-login-secret-0123456789abcdef';
@@ -36,18 +37,18 @@ async function csrf(): Promise<Csrf> {
   if (!cookie) throw new Error('CSRF cookie not returned');
   return { token, cookie };
 }
-async function requestLink(email: string, pair: Csrf): Promise<InjectResponse> {
+async function requestLink(email: string, pair: Csrf, ip = '198.51.100.1'): Promise<InjectResponse> {
   return app.inject({
     method: 'POST', url: '/api/v1/auth/request',
-    headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+    headers: { cookie: pair.cookie, 'x-csrf-token': pair.token, 'x-forwarded-for': ip },
     payload: { email }
   });
 }
 async function issueOwnerToken(pair: Csrf): Promise<string> {
   return issueTokenFor(ownerEmail, pair);
 }
-async function issueTokenFor(email: string, pair: Csrf): Promise<string> {
-  const response = await requestLink(email, pair);
+async function issueTokenFor(email: string, pair: Csrf, ip?: string): Promise<string> {
+  const response = await requestLink(email, pair, ip);
   expect(response.statusCode).toBe(200);
   const messages = takeTestMails();
   expect(messages).toHaveLength(1);
@@ -55,10 +56,10 @@ async function issueTokenFor(email: string, pair: Csrf): Promise<string> {
   if (!token) throw new Error('Magic link token not found in test email');
   return token;
 }
-async function verifyToken(token: string, pair: Csrf): Promise<InjectResponse> {
+async function verifyToken(token: string, pair: Csrf, ip = '198.51.100.1'): Promise<InjectResponse> {
   return app.inject({
     method: 'POST', url: '/api/v1/auth/verify',
-    headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+    headers: { cookie: pair.cookie, 'x-csrf-token': pair.token, 'x-forwarded-for': ip },
     payload: { token }
   });
 }
@@ -85,7 +86,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   sqlite.exec(`DELETE FROM reminders; DELETE FROM push_subscriptions; DELETE FROM sessions; DELETE FROM login_tokens;
-    DELETE FROM audit_log; DELETE FROM tasks; DELETE FROM meetings; DELETE FROM reminder_prefs; DELETE FROM users;`);
+    DELETE FROM auth_rate_limits; DELETE FROM audit_log; DELETE FROM tasks; DELETE FROM meetings; DELETE FROM reminder_prefs; DELETE FROM users;`);
   takeTestMails();
 });
 
@@ -104,6 +105,7 @@ describe('single-owner email authentication', () => {
       payload: { email: ownerEmail }
     });
     expect(requested.statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/auth/signup', payload: { email: ownerEmail } })).statusCode).toBe(403);
     const [message] = takeTestMails();
     expect(message).toBeDefined();
     expect(message!.text).toContain('http://127.0.0.1:3001/signin?token=');
@@ -122,6 +124,8 @@ describe('single-owner email authentication', () => {
 
   it('returns the same generic response for any signup address', async () => {
     const pair = await csrf();
+    const existingToken = await issueTokenFor(ownerEmail, pair);
+    expect((await verifyToken(existingToken, pair)).statusCode).toBe(200);
     const wrong = await requestLink('other@example.test', pair);
     const owner = await requestLink(ownerEmail, pair);
     expect(wrong.statusCode).toBe(200);
@@ -186,13 +190,48 @@ describe('single-owner email authentication', () => {
 
   it('limits magic-link sends per owner account while keeping the generic response', async () => {
     const pair = await csrf();
-    for (let index = 0; index < 5; index++) await requestLink(ownerEmail, pair);
+    for (let index = 0; index < 5; index++) await requestLink(ownerEmail, pair, `203.0.113.${index + 1}`);
     const messages = takeTestMails();
     expect(messages).toHaveLength(5);
-    const limited = await requestLink(ownerEmail, pair);
+    const limited = await requestLink(ownerEmail, pair, '203.0.113.20');
     expect(limited.statusCode).toBe(200);
     expect(limited.json()).toEqual({ ok: true, message: 'If the address is eligible, a sign-in link will arrive shortly.' });
     expect(takeTestMails()).toHaveLength(0);
+  });
+
+  it('limits signup attempts per IP even when each attempt uses a different email', async () => {
+    const pair = await csrf();
+    for (let index = 0; index < 5; index++) {
+      expect((await requestLink(`ip-limit-${index}@example.test`, pair, '203.0.113.80')).statusCode).toBe(200);
+    }
+    takeTestMails();
+    await requestLink('ip-limit-final@example.test', pair, '203.0.113.80');
+    expect(takeTestMails()).toHaveLength(0);
+  });
+
+  it('limits invalid verification attempts per IP and per email', async () => {
+    const pair = await csrf();
+    const ipToken = await issueTokenFor('verify-ip@example.test', pair);
+    takeTestMails();
+    for (let index = 0; index < 5; index++) {
+      expect((await verifyToken('invalid-token', pair, '203.0.113.90')).statusCode).toBe(400);
+    }
+    expect((await verifyToken(ipToken, pair, '203.0.113.90')).statusCode).toBe(400);
+
+    const emailToken = await issueTokenFor('verify-email@example.test', pair, '203.0.113.91');
+    expect((await verifyToken(emailToken, pair, '203.0.113.91')).statusCode).toBe(200);
+    for (let index = 0; index < 4; index++) {
+      expect((await verifyToken(emailToken, pair, `203.0.113.${100 + index}`)).statusCode).toBe(400);
+    }
+    expect((await verifyToken(emailToken, pair, '203.0.113.110')).statusCode).toBe(400);
+  });
+
+  it('stores magic-link tokens as hashes rather than raw values', async () => {
+    const pair = await csrf();
+    const rawToken = await issueTokenFor('hashed-token@example.test', pair);
+    const stored = sqlite.prepare('SELECT token_hash FROM login_tokens WHERE email=?').get('hashed-token@example.test') as { token_hash: string };
+    expect(stored.token_hash).not.toBe(rawToken);
+    expect(stored.token_hash).toBe(createHash('sha256').update(rawToken).digest('hex'));
   });
 });
 

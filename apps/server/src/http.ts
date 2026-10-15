@@ -115,7 +115,7 @@ class ApiRouter implements ApiTestApp {
 
     const current = Date.now();
     const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-    const ip = config.TRUST_PROXY && forwardedFor ? forwardedFor : 'unknown';
+    const ip = (config.TRUST_PROXY || process.env.VERCEL === '1') && forwardedFor ? forwardedFor : 'unknown';
     const bucket = this.buckets.get(ip);
     if (!bucket || current - bucket.start >= 60_000) this.buckets.set(ip, { start: current, count: 1 });
     else bucket.count++;

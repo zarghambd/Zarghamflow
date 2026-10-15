@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { loginRequestSchema, loginVerifySchema } from '@zarghamflow/shared';
 import { config } from './config.js';
-import { dbAll, dbGet, dbRun, dbTransaction } from './db/index.js';
+import { dbAll, dbGet, dbRun, dbTransaction, isPostgres } from './db/index.js';
 import { sendMail } from './mail.js';
 import { hashIp, randomToken, safeEqual, sha256 } from './security.js';
 import type { ApiApp, ApiReply, ApiRequest } from './http-types.js';
@@ -10,6 +10,8 @@ const SESSION_COOKIE = 'zf_session';
 const CSRF_COOKIE = 'zf_csrf';
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const TEN_MINUTES = 10 * 60 * 1000;
+const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_RATE_LIMIT = 5;
 const iso = (date: Date): string => date.toISOString();
 
 type UserRow = { id: string; email: string; timezone: string; locale: string; settings_json: string; role: 'admin'|'user'; active: number };
@@ -17,6 +19,52 @@ type SessionRow = { id: string; user_id: string; token_hash: string; expires_at:
 
 function cookieOptions(secure: boolean) {
   return { path: '/', httpOnly: true, secure, sameSite: 'lax' as const };
+}
+
+async function recordAuthAttempt(kind: 'signup' | 'verify', ipHash: string, emailHash?: string): Promise<{ limited: boolean; id?: string }> {
+  const now = new Date();
+  const since = iso(new Date(now.getTime() - AUTH_RATE_WINDOW_MS));
+  return dbTransaction(async (database) => {
+    if (isPostgres) {
+      await database.get('SELECT pg_advisory_xact_lock(hashtext(?)) AS locked', [`auth:${kind}:ip:${ipHash}`]);
+      if (emailHash) await database.get('SELECT pg_advisory_xact_lock(hashtext(?)) AS locked', [`auth:${kind}:email:${emailHash}`]);
+    }
+    const recentByIp = await database.get<{ count: number | string }>(
+      'SELECT COUNT(*) AS count FROM auth_rate_limits WHERE kind=? AND ip_hash=? AND created_at>?',
+      [kind, ipHash, since]
+    );
+    const recentByEmail = emailHash
+      ? await database.get<{ count: number | string }>(
+        'SELECT COUNT(*) AS count FROM auth_rate_limits WHERE kind=? AND email_hash=? AND created_at>?',
+        [kind, emailHash, since]
+      )
+      : undefined;
+    if (Number(recentByIp?.count ?? 0) >= AUTH_RATE_LIMIT || Number(recentByEmail?.count ?? 0) >= AUTH_RATE_LIMIT) {
+      return { limited: true };
+    }
+    const id = randomUUID();
+    await database.run(
+      'INSERT INTO auth_rate_limits (id,kind,ip_hash,email_hash,created_at) VALUES (?,?,?,?,?)',
+      [id, kind, ipHash, emailHash ?? null, iso(now)]
+    );
+    await database.run('DELETE FROM auth_rate_limits WHERE created_at<?', [iso(new Date(now.getTime() - 24 * 60 * 60 * 1000))]);
+    return { limited: false, id };
+  });
+}
+
+async function attachVerifyEmail(attemptId: string, emailHash: string): Promise<boolean> {
+  const since = iso(new Date(Date.now() - AUTH_RATE_WINDOW_MS));
+  return dbTransaction(async (database) => {
+    if (isPostgres) {
+      await database.get('SELECT pg_advisory_xact_lock(hashtext(?)) AS locked', [`auth:verify:email:${emailHash}`]);
+    }
+    await database.run('UPDATE auth_rate_limits SET email_hash=? WHERE id=?', [emailHash, attemptId]);
+    const recent = await database.get<{ count: number | string }>(
+      'SELECT COUNT(*) AS count FROM auth_rate_limits WHERE kind=? AND email_hash=? AND created_at>?',
+      ['verify', emailHash, since]
+    );
+    return Number(recent?.count ?? 0) > AUTH_RATE_LIMIT;
+  });
 }
 
 export function registerAuth(app: ApiApp): void {
@@ -29,15 +77,18 @@ export function registerAuth(app: ApiApp): void {
   });
 
   const requestLink = async (request: ApiRequest, reply: ApiReply) => {
-    const parsed = loginRequestSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(200).send({ ok: true, message: 'If the address is eligible, a sign-in link will arrive shortly.' });
-    const email = parsed.data.email.trim().toLowerCase();
     const ip = hashIp(request.ip);
     const generic = { ok: true, message: 'If the address is eligible, a sign-in link will arrive shortly.' };
-    const recentByIp = await dbGet<{ count: number | string }>("SELECT COUNT(*) AS count FROM login_tokens WHERE ip_hash = ? AND kind = 'magic_link' AND created_at > ?", [ip, iso(new Date(Date.now() - 15 * 60_000))]);
-    const recentByAccount = await dbGet<{ count: number | string }>("SELECT COUNT(*) AS count FROM login_tokens WHERE lower(email) = lower(?) AND kind = 'magic_link' AND created_at > ?", [email, iso(new Date(Date.now() - 15 * 60_000))]);
+    const parsed = loginRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      await recordAuthAttempt('signup', ip);
+      return reply.code(200).send(generic);
+    }
+    const email = parsed.data.email.trim().toLowerCase();
+    const limited = await recordAuthAttempt('signup', ip, hashIp(email));
+    if (limited.limited) return reply.send(generic);
     const existing = await dbGet<{ active: number }>('SELECT active FROM users WHERE lower(email)=lower(?)', [email]);
-    if (Number(recentByIp?.count ?? 0) >= 5 || Number(recentByAccount?.count ?? 0) >= 5 || existing?.active === 0) return reply.send(generic);
+    if (existing?.active === 0) return reply.send(generic);
 
     const now = new Date();
     const loginTokenId = randomUUID();
@@ -66,12 +117,20 @@ export function registerAuth(app: ApiApp): void {
   app.post('/api/v1/auth/signup', requestLink);
 
   app.post('/api/v1/auth/verify', async (request, reply) => {
+    const ipHash = hashIp(request.ip);
+    const attempt = await recordAuthAttempt('verify', ipHash);
+    if (attempt.limited || !attempt.id) {
+      return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
+    }
     const parsed = loginVerifySchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
     const now = iso(new Date());
     const tokenHash = sha256(parsed.data.token);
-    const token = await dbGet<{ id: string; email: string; consumed_at: string | null }>("SELECT id,email,consumed_at FROM login_tokens WHERE token_hash = ? AND kind = 'magic_link' AND expires_at > ?", [tokenHash, now]);
-    if (!token) {
+    const token = await dbGet<{ id: string; email: string; token_hash: string; consumed_at: string | null }>("SELECT id,email,token_hash,consumed_at FROM login_tokens WHERE token_hash = ? AND kind = 'magic_link' AND expires_at > ?", [tokenHash, now]);
+    if (!token || !safeEqual(token.token_hash, tokenHash)) {
+      return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
+    }
+    if (await attachVerifyEmail(attempt.id, hashIp(token.email.trim().toLowerCase()))) {
       return reply.code(400).send({ error: { code: 'INVALID_TOKEN', message: 'Sign-in link is invalid or expired.' } });
     }
     if (token.consumed_at) {

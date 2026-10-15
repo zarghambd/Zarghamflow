@@ -49,6 +49,18 @@ async function requestLink(email: string, pair: Csrf, ip = '198.51.100.1'): Prom
 async function issueOwnerToken(pair: Csrf): Promise<string> {
   return issueTokenFor(ownerEmail, pair);
 }
+async function issueLoginTokenFor(email: string, pair: Csrf): Promise<string> {
+  const response = await app.inject({
+    method: 'POST', url: '/api/v1/auth/login',
+    headers: { cookie: pair.cookie, 'x-csrf-token': pair.token, 'x-forwarded-for': '198.51.100.1' },
+    payload: { email }
+  });
+  expect(response.statusCode).toBe(200);
+  const code = /Your ZarghamFlow code is (\d{6})/.exec(takeTestMails()[0]?.text ?? '')?.[1];
+  if (!code) throw new Error('6-digit OTP not found in test email');
+  otpEmails.set(code, email.trim().toLowerCase());
+  return code;
+}
 async function issueTokenFor(email: string, pair: Csrf, ip?: string): Promise<string> {
   const response = await requestLink(email, pair, ip);
   expect(response.statusCode).toBe(200);
@@ -95,6 +107,21 @@ beforeEach(() => {
 });
 
 describe('single-owner email authentication', () => {
+  it('includes Retry-After when the API-wide request limit is reached', async () => {
+    const { config } = await import('./config.js');
+    const previousLimit = config.RATE_LIMIT_MAX;
+    config.RATE_LIMIT_MAX = 1;
+    try {
+      const headers = { 'x-forwarded-for': '198.51.100.254' };
+      expect((await app.inject({ method: 'GET', url: '/api/v1/auth/csrf', headers })).statusCode).toBe(200);
+      const limited = await app.inject({ method: 'GET', url: '/api/v1/auth/csrf', headers });
+      expect(limited.statusCode).toBe(429);
+      expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+    } finally {
+      config.RATE_LIMIT_MAX = previousLimit;
+    }
+  });
+
   it('serves the same-origin auth aliases and requires CSRF before issuing an OTP', async () => {
     const csrfResponse = await app.inject({ method: 'GET', url: '/api/auth/csrf' });
     expect(csrfResponse.statusCode).toBe(200);
@@ -129,23 +156,84 @@ describe('single-owner email authentication', () => {
     expect((verified.json() as { redirect: string }).redirect).toBe('/admin');
   });
 
-  it('returns the same generic response for existing, new, and deactivated addresses', async () => {
+  it('creates a named account after signup OTP verification', async () => {
+    const pair = await csrf();
+    const signup = await app.inject({
+      method: 'POST', url: '/api/v1/auth/signup',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+      payload: { firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.test' }
+    });
+    expect(signup.statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/auth/me' })).statusCode).toBe(401);
+    const code = /Your ZarghamFlow code is (\d{6})/.exec(takeTestMails()[0]?.text ?? '')?.[1];
+    expect(code).toBeDefined();
+    const verified = await app.inject({
+      method: 'POST', url: '/api/v1/auth/verify',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+      payload: { email: 'ada@example.test', code }
+    });
+    expect(verified.statusCode).toBe(200);
+    expect((verified.json() as { user: { email: string; firstName: string; lastName: string } }).user)
+      .toMatchObject({ email: 'ada@example.test', firstName: 'Ada', lastName: 'Lovelace' });
+    expect(sqlite.prepare('SELECT first_name,last_name FROM users WHERE email=?').get('ada@example.test'))
+      .toEqual({ first_name: 'Ada', last_name: 'Lovelace' });
+  });
+
+  it('requires unique signup emails and supports OTP login only for existing accounts', async () => {
     const pair = await csrf();
     const existingCode = await issueTokenFor(ownerEmail, pair);
     expect((await verifyToken(existingCode, pair)).statusCode).toBe(200);
+
+    const duplicateSignup = await app.inject({
+      method: 'POST', url: '/api/v1/auth/signup',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+      payload: { firstName: 'Existing', lastName: 'User', email: ownerEmail }
+    });
+    expect(duplicateSignup.statusCode).toBe(409);
+    expect(duplicateSignup.json()).toMatchObject({ error: { code: 'ACCOUNT_EXISTS' } });
+
+    const missingAccount = await app.inject({
+      method: 'POST', url: '/api/v1/auth/login',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+      payload: { email: 'unknown@example.test' }
+    });
+    expect(missingAccount.statusCode).toBe(404);
+
     sqlite.prepare('UPDATE auth_otps SET created_at=? WHERE email=?').run(new Date(Date.now() - 61_000).toISOString(), ownerEmail);
-    const known = await requestLink(ownerEmail, pair);
+    const login = await app.inject({
+      method: 'POST', url: '/api/v1/auth/login',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+      payload: { email: ownerEmail }
+    });
+    expect(login.statusCode).toBe(200);
+    const loginCode = /Your ZarghamFlow code is (\d{6})/.exec(takeTestMails()[0]?.text ?? '')?.[1];
+    expect(loginCode).toBeDefined();
+    expect((await verifyToken(loginCode!, pair)).statusCode).toBe(200);
+
     sqlite.prepare('UPDATE auth_otps SET created_at=? WHERE email=?').run(new Date(Date.now() - 61_000).toISOString(), ownerEmail);
-    const unknown = await requestLink('other@example.test', pair);
+    const disabledLogin = await app.inject({
+      method: 'POST', url: '/api/v1/auth/login',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+      payload: { email: ownerEmail }
+    });
+    expect(disabledLogin.statusCode).toBe(200);
+    const disabledCode = /Your ZarghamFlow code is (\d{6})/.exec(takeTestMails()[0]?.text ?? '')?.[1];
+    expect(disabledCode).toBeDefined();
     sqlite.prepare("UPDATE users SET active=0 WHERE lower(email)=lower(?)").run(ownerEmail);
     sqlite.prepare('UPDATE auth_otps SET created_at=? WHERE email=?').run(new Date(Date.now() - 61_000).toISOString(), ownerEmail);
-    const disabled = await requestLink(ownerEmail, pair);
-    expect(known.statusCode).toBe(200);
-    expect(unknown.statusCode).toBe(200);
-    expect(disabled.statusCode).toBe(200);
-    expect(unknown.json()).toEqual(known.json());
-    expect(disabled.json()).toEqual(known.json());
-    expect(takeTestMails()).toHaveLength(3);
+    const deniedVerify = await verifyToken(disabledCode!, pair);
+    expect(deniedVerify.statusCode).toBe(403);
+    expect(deniedVerify.json()).toMatchObject({
+      error: { code: 'ACCOUNT_DISABLED', message: 'Your account has been disabled. Please contact the admin to have your account enabled.' }
+    });
+    const deniedLogin = await app.inject({
+      method: 'POST', url: '/api/v1/auth/login',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token },
+      payload: { email: ownerEmail }
+    });
+    expect(deniedLogin.statusCode).toBe(403);
+    expect(deniedLogin.json()).toMatchObject({ error: { code: 'ACCOUNT_DISABLED' } });
+    expect(takeTestMails()).toHaveLength(0);
   });
 
   it('requires CSRF, rejects OTP replays, rotates sessions, and preserves logout-all', async () => {
@@ -172,7 +260,7 @@ describe('single-owner email authentication', () => {
     expect((await verifyToken(code, pair)).statusCode).toBe(400);
 
     sqlite.prepare('UPDATE auth_otps SET created_at=? WHERE email=?').run(new Date(Date.now() - 61_000).toISOString(), ownerEmail);
-    const nextCode = await issueOwnerToken(pair);
+    const nextCode = await issueLoginTokenFor(ownerEmail, pair);
     const rotated = await app.inject({
       method: 'POST', url: '/api/v1/auth/verify',
       headers: { cookie: `${pair.cookie}; ${sessionCookie}`, 'x-csrf-token': pair.token },
@@ -209,14 +297,14 @@ describe('single-owner email authentication', () => {
     expect((await verifyToken(secondCode, pair)).statusCode).toBe(200);
   });
 
-  it('keeps signup generic after a delivery failure and stores only the OTP hash', async () => {
+  it('reports OTP delivery failures only in server logs and stores only the OTP hash', async () => {
     const pair = await csrf();
     failNextTestEmails();
 
     const response = await requestLink(ownerEmail, pair);
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, message: 'If the address is eligible, a sign-in code will arrive shortly.' });
+    expect(response.json()).toEqual({ ok: true, message: 'A verification code was sent to your email.' });
     expect((sqlite.prepare('SELECT COUNT(*) AS count FROM auth_otps WHERE email=?').get(ownerEmail) as { count: number }).count).toBe(1);
     expect(takeTestMails()).toHaveLength(0);
   });
@@ -297,17 +385,17 @@ describe('single-owner email authentication', () => {
     expect(stored.code_hash).toBe(expectedHash);
   });
 
-  it('returns the same invalid-code failure for deactivated accounts', async () => {
+  it('reports a disabled account when verifying an issued code', async () => {
     const pair = await csrf();
     const code = await issueTokenFor('disabled@example.test', pair);
     const stamp = new Date().toISOString();
     sqlite.prepare("INSERT INTO users(id,email,timezone,locale,settings_json,role,active,created_at,updated_at) VALUES(?,?,?,?,?,'user',0,?,?)")
       .run(randomUUID(), 'disabled@example.test', 'UTC', 'en-GB', '{}', stamp, stamp);
     const disabled = await verifyToken(code, pair, '198.51.100.4');
-    const wrongCode = code === '000000' ? '000001' : '000000';
-    const invalid = await verifyToken(wrongCode, pair, '198.51.100.5', 'disabled@example.test');
-    expect(disabled.statusCode).toBe(invalid.statusCode);
-    expect(disabled.json()).toEqual(invalid.json());
+    expect(disabled.statusCode).toBe(403);
+    expect(disabled.json()).toMatchObject({
+      error: { code: 'ACCOUNT_DISABLED', message: 'Your account has been disabled. Please contact the admin to have your account enabled.' }
+    });
   });
 
   it('cleans expired OTP rows when a new code is requested', async () => {
@@ -321,6 +409,68 @@ describe('single-owner email authentication', () => {
 });
 
 describe('multi-user signup and administration', () => {
+  it('updates names and changes email only after verifying a code sent to the new address', async () => {
+    const pair = await csrf();
+    const signup = await app.inject({
+      method: 'POST', url: '/api/v1/auth/signup',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token, 'x-forwarded-for': '203.0.113.201' },
+      payload: { firstName: 'Grace', lastName: 'Hopper', email: 'grace@example.test' }
+    });
+    expect(signup.statusCode).toBe(200);
+    const signupCode = /Your ZarghamFlow code is (\d{6})/.exec(takeTestMails()[0]?.text ?? '')?.[1];
+    expect(signupCode).toBeDefined();
+    const login = await app.inject({
+      method: 'POST', url: '/api/v1/auth/verify',
+      headers: { cookie: pair.cookie, 'x-csrf-token': pair.token, 'x-forwarded-for': '203.0.113.201' },
+      payload: { email: 'grace@example.test', code: signupCode }
+    });
+    expect(login.statusCode).toBe(200);
+    const session = setCookies(login).find((value) => value.startsWith('zf_session='))!;
+    const headers = { cookie: `${pair.cookie}; ${session}`, 'x-csrf-token': pair.token, 'x-forwarded-for': '203.0.113.201' };
+
+    const profile = await app.inject({
+      method: 'PATCH', url: '/api/v1/auth/profile', headers,
+      payload: { firstName: 'Amazing', lastName: 'Grace' }
+    });
+    expect(profile.statusCode).toBe(200);
+    expect((profile.json() as { user: { firstName: string; lastName: string } }).user)
+      .toMatchObject({ firstName: 'Amazing', lastName: 'Grace' });
+
+    const duplicateEmail = await app.inject({
+      method: 'POST', url: '/api/v1/auth/email-change/request', headers,
+      payload: { email: ownerEmail }
+    });
+    expect(duplicateEmail.statusCode).toBe(409);
+
+    const requested = await app.inject({
+      method: 'POST', url: '/api/v1/auth/email-change/request', headers,
+      payload: { email: 'grace.new@example.test' }
+    });
+    expect(requested.statusCode).toBe(200);
+    const changeCode = /email change code is (\d{6})/.exec(takeTestMails()[0]?.text ?? '')?.[1];
+    expect(changeCode).toBeDefined();
+    expect(sqlite.prepare('SELECT email,code_hash FROM email_change_otps WHERE user_id=(SELECT id FROM users WHERE email=?)')
+      .get('grace@example.test')).toMatchObject({ email: 'grace.new@example.test' });
+
+    const badCode = await app.inject({
+      method: 'POST', url: '/api/v1/auth/email-change/verify', headers,
+      payload: { email: 'grace.new@example.test', code: '000000' === changeCode ? '000001' : '000000' }
+    });
+    expect(badCode.statusCode).toBe(400);
+    const verified = await app.inject({
+      method: 'POST', url: '/api/v1/auth/email-change/verify', headers,
+      payload: { email: 'grace.new@example.test', code: changeCode }
+    });
+    expect(verified.statusCode).toBe(200);
+    expect((verified.json() as { user: { email: string } }).user.email).toBe('grace.new@example.test');
+    const current = await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers });
+    expect((current.json() as { user: { email: string; firstName: string; lastName: string } }).user)
+      .toMatchObject({ email: 'grace.new@example.test', firstName: 'Amazing', lastName: 'Grace' });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM users WHERE email IN (?,?)')
+      .get('grace@example.test', 'grace.new@example.test')).toEqual({ count: 1 });
+    expect((await verifyToken(changeCode!, pair, '203.0.113.201', 'grace.new@example.test')).statusCode).not.toBe(200);
+  });
+
   it('grants administrator role only to the configured ADMIN_EMAIL', async () => {
     const { config } = await import('./config.js');
     const previousAdminEmail = config.ADMIN_EMAIL;
@@ -375,7 +525,24 @@ describe('multi-user signup and administration', () => {
 
     const deactivate=await app.inject({method:'PATCH',url:`/api/v1/admin/users/${memberId}`,headers:{cookie:`${pair.cookie}; ${adminCookie}`,'x-csrf-token':pair.token},payload:{active:false}});
     expect(deactivate.statusCode).toBe(200);
-    expect((await app.inject({method:'GET',url:'/api/v1/auth/me',headers:{cookie:`${pair.cookie}; ${memberCookie}`}})).statusCode).toBe(401);
+    const blockedSession = await app.inject({method:'GET',url:'/api/v1/auth/me',headers:{cookie:`${pair.cookie}; ${memberCookie}`}});
+    expect(blockedSession.statusCode).toBe(403);
+    expect(blockedSession.json()).toMatchObject({
+      error: { code: 'ACCOUNT_DISABLED', message: 'Your account has been disabled. Please contact the admin to have your account enabled.' }
+    });
+    const blockedPlanner = await app.inject({method:'GET',url:'/api/v1/tasks',headers:{cookie:`${pair.cookie}; ${memberCookie}`}});
+    expect(blockedPlanner.statusCode).toBe(403);
+
+    const enable=await app.inject({method:'PATCH',url:`/api/v1/admin/users/${memberId}`,headers:{cookie:`${pair.cookie}; ${adminCookie}`,'x-csrf-token':pair.token},payload:{active:true}});
+    expect(enable.statusCode).toBe(200);
+    sqlite.prepare('UPDATE auth_otps SET created_at=? WHERE email=?').run(new Date(Date.now() - 61_000).toISOString(), 'member@example.test');
+    const relogin=await app.inject({
+      method:'POST',url:'/api/v1/auth/login',headers:{cookie:pair.cookie,'x-csrf-token':pair.token},payload:{email:'member@example.test'}
+    });
+    expect(relogin.statusCode).toBe(200);
+    const newCode=/Your ZarghamFlow code is (\d{6})/.exec(takeTestMails()[0]?.text??'')?.[1];
+    expect(newCode).toBeDefined();
+    expect((await verifyToken(newCode!,pair,'198.51.100.1','member@example.test')).statusCode).toBe(200);
 
     const admins=sqlite.prepare("SELECT id FROM users WHERE role='admin' AND active=1").all() as Array<{id:string}>;
     expect(admins).toHaveLength(1);

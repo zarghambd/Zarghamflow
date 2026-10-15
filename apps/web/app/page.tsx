@@ -62,7 +62,7 @@ export default function HomePage() {
             <rect width="32" height="32" rx="9" fill="#0e7c66" />
             <path d="M9 17l5 5 9-12" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Taskora
+          <span>Taskora <span className="tk-logo-byline">by Zargham</span></span>
         </Link>
         <nav className="tk-nav" aria-label="Main navigation">
           <a href="#features">Features</a>
@@ -70,8 +70,8 @@ export default function HomePage() {
           <a href="#flow">How it works</a>
         </nav>
         <div className="tk-header-actions">
-          <Link href="/signin" className="tk-btn tk-btn--secondary tk-btn--sm">Log in</Link>
-          <Link href="/signin" className="tk-btn tk-btn--primary tk-btn--sm">Get started</Link>
+          <Link href="/login" className="tk-btn tk-btn--secondary tk-btn--sm">Sign In</Link>
+          <Link href="/signup" className="tk-btn tk-btn--primary tk-btn--sm">Get Started</Link>
         </div>
       </header>
 
@@ -82,7 +82,7 @@ export default function HomePage() {
             <h1>Turn plans into progress.</h1>
             <p>Taskora connects your daily meetings, tasks and owners in one shared workspace, so everyone knows what was decided and what is done.</p>
             <div className="tk-cta-row">
-              <Link href="/signin" className="tk-btn tk-btn--primary">Start free</Link>
+              <Link href="/signup" className="tk-btn tk-btn--primary">Get Started</Link>
               <a href="#flow" className="tk-btn tk-btn--secondary">See how it works</a>
             </div>
           </div>
@@ -147,11 +147,11 @@ export default function HomePage() {
         <section className="tk-wrap tk-final">
           <h2>Ready to turn plans into progress?</h2>
           <p>Create your team workspace in minutes.</p>
-          <Link href="/signin" className="tk-btn tk-btn--primary">Get started with Taskora</Link>
+          <Link href="/signup" className="tk-btn tk-btn--primary">Get Started with Taskora</Link>
         </section>
       </main>
 
-      <footer className="tk-footer">© Taskora. Turn plans into progress.</footer>
+      <footer className="tk-footer">© Taskora by Zargham. Turn plans into progress.</footer>
     </>
   );
 }

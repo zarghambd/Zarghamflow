@@ -68,7 +68,18 @@ export const reminderPrefsSchema = z.object({
 
 const normalizedEmail = z.string().trim().toLowerCase().max(254).email();
 export const OtpRequestSchema = z.object({ email: normalizedEmail });
+export const OtpSignupSchema = z.object({
+  firstName: z.string().trim().min(1).max(100),
+  lastName: z.string().trim().min(1).max(100),
+  email: normalizedEmail
+});
 export const OtpVerifySchema = z.object({ email: normalizedEmail, code: z.string().regex(/^\d{6}$/) });
+export const ProfileUpdateSchema = z.object({
+  firstName: z.string().trim().min(1).max(100),
+  lastName: z.string().trim().min(1).max(100)
+});
+export const EmailChangeRequestSchema = z.object({ email: normalizedEmail });
+export const EmailChangeVerifySchema = z.object({ email: normalizedEmail, code: z.string().regex(/^\d{6}$/) });
 export const paginationSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), offset: z.coerce.number().int().min(0).default(0) });
 export const importSchema = z.object({ mode: z.enum(['merge', 'replace']), data: z.object({ meetings: z.array(z.unknown()).default([]), tasks: z.array(z.unknown()).default([]) }) });
 

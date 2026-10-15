@@ -1,4 +1,4 @@
-export type ApiOwner = { id: string; email: string; role: 'admin' | 'user'; sessionId: string };
+export type ApiOwner = { id: string; email: string; role: 'admin' | 'user'; sessionId: string; firstName: string; lastName: string };
 export type ApiRequest = {
   method: string;
   url: string;

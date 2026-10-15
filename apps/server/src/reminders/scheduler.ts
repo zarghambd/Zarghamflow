@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DateTime } from 'luxon';
 import webpush from 'web-push';
-import { dbAll, dbGet, dbRun, dbTransaction } from '../db/index.js';
+import { dbAll, dbGet, dbRun, dbTransaction, type DatabaseSession } from '../db/index.js';
 import { config } from '../config.js';
 import { sendMail } from '../mail.js';
 import { localToUtc } from './time.js';
@@ -17,10 +17,17 @@ if (config.VAPID_PUBLIC_KEY && config.VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(config.VAPID_SUBJECT, config.VAPID_PUBLIC_KEY, config.VAPID_PRIVATE_KEY);
 }
 
-export async function scheduleEntityReminders(userId: string, type: 'task' | 'meeting', record: Record<string, unknown>, timezone: string, prefs: Record<string, unknown>): Promise<void> {
+export async function scheduleEntityReminders(
+  userId: string,
+  type: 'task' | 'meeting',
+  record: Record<string, unknown>,
+  timezone: string,
+  prefs: Record<string, unknown>,
+  session?: DatabaseSession
+): Promise<void> {
   const now = new Date().toISOString();
   const targetId = String(record.id);
-  await dbTransaction(async (database) => {
+  const schedule = async (database: DatabaseSession): Promise<void> => {
     await database.run("UPDATE reminders SET state = 'cancelled', updated_at = ? WHERE user_id = ? AND target_type = ? AND target_id = ? AND state IN ('pending','failed')", [now, userId, type, targetId]);
     const leads = record.reminderLeadMinutes as number[] | null | undefined;
     if (type === 'task' && record.status === 'Done') return;
@@ -71,7 +78,9 @@ export async function scheduleEntityReminders(userId: string, type: 'task' | 'me
         ON CONFLICT(dedupe_key) DO UPDATE SET fire_at=excluded.fire_at,state='pending',attempts=0,last_error=NULL,sent_at=NULL,updated_at=excluded.updated_at
         WHERE reminders.state IN ('cancelled','failed')`, params);
     }
-  });
+  };
+  if (session) await schedule(session);
+  else await dbTransaction(schedule);
 }
 
 async function claimDue(now: string): Promise<DueReminder[]> {

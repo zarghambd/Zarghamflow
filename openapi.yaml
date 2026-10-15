@@ -12,8 +12,8 @@ paths:
       responses: {'200': {description: CSRF token}}
   /auth/request:
     post:
-      summary: Request a sign-in code (alias of signup)
-      description: Requires the zf_csrf cookie and X-CSRF-Token header. The response is generic for every email address.
+      summary: Legacy OTP signup request
+      description: Requires the zf_csrf cookie and X-CSRF-Token header. New clients should use /auth/signup or /auth/login.
       requestBody:
         required: true
         content:
@@ -21,7 +21,7 @@ paths:
             schema: {$ref: '#/components/schemas/OtpRequest'}
       responses:
         '200':
-          description: Generic code-request response
+          description: OTP request accepted for the legacy registration alias
           content:
             application/json:
               schema: {$ref: '#/components/schemas/OtpRequestResponse'}
@@ -34,19 +34,42 @@ paths:
               schema: {$ref: '#/components/schemas/ApiError'}
   /auth/signup:
     post:
-      summary: Request a sign-in code
-      description: Signup and login share this flow. Requires the zf_csrf cookie and X-CSRF-Token header.
+      summary: Register a new account and request a verification code
+      description: Requires the zf_csrf cookie and X-CSRF-Token header. Existing email addresses return 409 ACCOUNT_EXISTS.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/OtpSignup'}
+      responses:
+        '200':
+          description: Verification code sent; the client should immediately display code entry
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OtpRequestResponse'}
+        '400': {description: Invalid signup details}
+        '409': {description: Email address already belongs to an account}
+        '429':
+          description: Send limit or resend cooldown reached
+          headers:
+            Retry-After: {description: Seconds until another request is accepted, schema: {type: integer, minimum: 1}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ApiError'}
+  /auth/login:
+    post:
+      summary: Request a sign-in code for an existing account
+      description: Requires the zf_csrf cookie and X-CSRF-Token header.
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/OtpRequest'}
       responses:
-        '200':
-          description: Generic response independent of whether the address exists
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/OtpRequestResponse'}
+        '200': {description: Sign-in code sent}
+        '400': {description: Invalid email address}
+        '404': {description: No account exists for this email}
+        '403': {description: Account is disabled}
         '429':
           description: Send limit or resend cooldown reached
           headers:
@@ -70,10 +93,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/OtpVerifyResponse'}
         '400':
-          description: Invalid, expired, or deactivated-account code
+          description: Invalid or expired code
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ApiError'}
+        '403': {description: Account is disabled}
+        '404': {description: Login code does not match an existing account}
+        '409': {description: Signup code was verified after an account was registered for this email}
         '429':
           description: Verification rate limit or code attempt lock reached
           headers:
@@ -84,7 +110,7 @@ paths:
   /auth/me:
     get:
       security: [{cookieAuth: []}]
-      responses: {'200': {description: Current user}}
+      responses: {'200': {description: Current user}, '401': {description: No valid session}, '403': {description: Account is disabled}}
   /meetings:
     get:
       security: [{cookieAuth: []}]
@@ -99,12 +125,12 @@ paths:
       responses: {'200': {description: Paged meetings}}
     post:
       security: [{cookieAuth: []}, {csrf: []}]
-      responses: {'201': {description: Created meeting}, '400': {description: Validation error}}
+      responses: {'201': {description: Created meeting}, '400': {description: Validation error}, '409': {description: Meeting title already exists}}
   /meetings/{id}:
     patch:
       security: [{cookieAuth: []}, {csrf: []}]
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
-      responses: {'200': {description: Updated meeting}, '409': {description: Version conflict}}
+      responses: {'200': {description: Updated meeting}, '409': {description: Version conflict or duplicate title}}
     delete:
       security: [{cookieAuth: []}, {csrf: []}]
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
@@ -112,25 +138,25 @@ paths:
   /meetings/{id}/duplicate:
     post:
       security: [{cookieAuth: []}, {csrf: []}]
-      responses: {'201': {description: Duplicated meeting}}
+      responses: {'201': {description: Duplicated meeting}, '409': {description: Meeting title already exists}}
   /tasks:
     get:
       security: [{cookieAuth: []}]
       responses: {'200': {description: Paged tasks}}
     post:
       security: [{cookieAuth: []}, {csrf: []}]
-      responses: {'201': {description: Created task}}
+      responses: {'201': {description: Created task}, '409': {description: Task title already exists}}
   /tasks/{id}:
     patch:
       security: [{cookieAuth: []}, {csrf: []}]
-      responses: {'200': {description: Updated task}, '409': {description: Version conflict}}
+      responses: {'200': {description: Updated task}, '409': {description: Version conflict or duplicate title}}
     delete:
       security: [{cookieAuth: []}, {csrf: []}]
       responses: {'204': {description: Soft deleted}}
   /tasks/quick-add:
     post:
       security: [{cookieAuth: []}, {csrf: []}]
-      responses: {'201': {description: Parsed task}}
+      responses: {'201': {description: Parsed task}, '409': {description: Task title already exists}}
   /dashboard:
     get:
       security: [{cookieAuth: []}]
@@ -171,6 +197,13 @@ paths:
       responses: {'200': {description: iCalendar export}}
 components:
   schemas:
+    OtpSignup:
+      type: object
+      required: [firstName, lastName, email]
+      properties:
+        firstName: {type: string, minLength: 1, maxLength: 100}
+        lastName: {type: string, minLength: 1, maxLength: 100}
+        email: {type: string, format: email, maxLength: 254}
     OtpRequest:
       type: object
       required: [email]
@@ -199,6 +232,8 @@ components:
           properties:
             email: {type: string, format: email}
             role: {type: string, enum: [admin, user]}
+            firstName: {type: string}
+            lastName: {type: string}
         redirect: {type: string, enum: [/admin, /planner]}
     ApiError:
       type: object

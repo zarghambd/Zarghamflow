@@ -3,6 +3,7 @@ import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqli
 export const users = sqliteTable('users', {
   id: text('id').primaryKey(), email: text('email').notNull().unique(), timezone: text('timezone').notNull().default('UTC'),
   locale: text('locale').notNull().default('en-GB'), settingsJson: text('settings_json').notNull().default('{}'),
+  firstName: text('first_name').notNull().default(''), lastName: text('last_name').notNull().default(''),
   role: text('role').notNull().default('user'), active: integer('active').notNull().default(1),
   createdAt: text('created_at').notNull(), updatedAt: text('updated_at').notNull()
 });

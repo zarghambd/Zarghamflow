@@ -41,7 +41,7 @@ async function createUser(email: string): Promise<UserContext> {
     method: 'POST',
     url: '/api/v1/auth/signup',
     headers: { cookie: csrf.cookie, 'x-csrf-token': csrf.token, 'x-forwarded-for': ip },
-    payload: { email }
+    payload: { firstName: 'Test', lastName: 'User', email }
   });
   if (requested.statusCode !== 200) throw new Error(`Signup failed: ${requested.statusCode}`);
   const messages = takeTestMails();
@@ -171,6 +171,28 @@ describe('planner CRUD', () => {
     expect((invalidTask.json() as { error: { fields: Array<{ path: string[] }> } }).error.fields).toContainEqual(
       expect.objectContaining({ path: ['dueDate'] })
     );
+  });
+
+  it('rejects duplicate task and meeting titles without regard to case or surrounding spaces', async () => {
+    const user = await createUser('duplicate-titles@example.test');
+    const task = await inject(user, 'POST', '/api/v1/tasks', taskInput);
+    expect(task.statusCode).toBe(201);
+    const duplicateTask = await inject(user, 'POST', '/api/v1/tasks', { ...taskInput, title: '  prepare AGENDA  ' });
+    expect(duplicateTask.statusCode).toBe(409);
+    expect(duplicateTask.json()).toMatchObject({ error: { code: 'DUPLICATE_TITLE', message: 'A task with this title already exists.' } });
+    const otherTask = await inject(user, 'POST', '/api/v1/tasks', { ...taskInput, title: 'Another task' });
+    const taskId = (otherTask.json() as { item: { id: string } }).item.id;
+    expect((await inject(user, 'PATCH', `/api/v1/tasks/${taskId}`, { title: 'prepare agenda' }, { 'if-match': '1' })).statusCode).toBe(409);
+    expect((await inject(user, 'POST', '/api/v1/tasks/quick-add', { text: 'Prepare agenda tomorrow' })).statusCode).toBe(409);
+
+    const meeting = await inject(user, 'POST', '/api/v1/meetings', meetingInput);
+    expect(meeting.statusCode).toBe(201);
+    const duplicateMeeting = await inject(user, 'POST', '/api/v1/meetings', { ...meetingInput, title: ' planning REVIEW ' });
+    expect(duplicateMeeting.statusCode).toBe(409);
+    expect(duplicateMeeting.json()).toMatchObject({ error: { code: 'DUPLICATE_TITLE', message: 'A meeting with this title already exists.' } });
+    const otherMeeting = await inject(user, 'POST', '/api/v1/meetings', { ...meetingInput, title: 'Another meeting' });
+    const meetingId = (otherMeeting.json() as { item: { id: string } }).item.id;
+    expect((await inject(user, 'PATCH', `/api/v1/meetings/${meetingId}`, { title: 'planning review' }, { 'if-match': '1' })).statusCode).toBe(409);
   });
 
   it('creates, reads, updates, conflicts, and deletes meetings and tasks', async () => {

@@ -6,9 +6,11 @@ test('a new user can sign in with OTP and create persistent tasks and meetings',
   const taskTitle = `Playwright task ${Date.now()}`;
 
   await page.route('**/service-worker.js*', (route) => route.abort());
-  await page.goto('/signin');
+  await page.goto('/signup');
+  await page.getByLabel('First name').fill('Smoke');
+  await page.getByLabel('Last name').fill('Tester');
   await page.getByLabel('Email address').fill(email);
-  await page.getByRole('button', { name: 'Send me a sign-in code' }).click();
+  await page.getByRole('button', { name: 'Sign Up' }).click();
   await expect(page.getByLabel('6-digit code')).toBeVisible({ timeout: 20_000 });
 
   let otp = '';

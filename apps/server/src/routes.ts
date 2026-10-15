@@ -4,7 +4,7 @@ import {
 } from '@zarghamflow/shared';
 import { DateTime } from 'luxon';
 import type { ZodIssue } from 'zod';
-import { dbAll, dbGet, dbRun, dbTransaction } from './db/index.js';
+import { dbAll, dbGet, dbRun, dbTransaction, isPostgres, type DatabaseSession } from './db/index.js';
 import { meetings, tasks } from './db/schema.js';
 import { schedulerHeartbeat, scheduleEntityReminders } from './reminders/scheduler.js';
 import { config } from './config.js';
@@ -40,15 +40,56 @@ function createTaskRecord(input: Record<string, unknown>, userId: string) {
   const { reminderLeadMinutes, ...fields } = input;
   return { ...fields, reminderLeadJson: reminderLeadMinutes === undefined ? null : JSON.stringify(reminderLeadMinutes), id: randomUUID(), userId, createdAt: stamp, updatedAt: stamp, deletedAt: null, version: 1 } as typeof tasks.$inferInsert;
 }
-async function insertMeeting(row: typeof meetings.$inferInsert): Promise<void> {
-  await dbRun(`INSERT INTO meetings (id,user_id,title,date,start,"end",client,contacts,type,location,notes,outcome,status,follow_up_date,reminder_lead_json,created_at,updated_at,deleted_at,version)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  [row.id,row.userId,row.title,row.date,row.start,row.end,row.client,row.contacts,row.type,row.location,row.notes,row.outcome,row.status,row.followUpDate,row.reminderLeadJson,row.createdAt,row.updatedAt,row.deletedAt,row.version]);
+async function assertUniqueTitle(database: DatabaseSession, entity: 'meeting' | 'task', userId: string, title: string, excludedId?: string): Promise<boolean> {
+  const normalizedTitle = title.trim().toLowerCase();
+  if (isPostgres) await database.get('SELECT pg_advisory_xact_lock(hashtext(?)) AS locked', [`planner-title:${entity}:${userId}:${normalizedTitle}`]);
+  const table = entity === 'meeting' ? 'meetings' : 'tasks';
+  const existing = await database.get<{ id: string }>(
+    `SELECT id FROM ${table} WHERE user_id=? AND lower(trim(title))=? AND deleted_at IS NULL AND id<>? LIMIT 1`,
+    [userId, normalizedTitle, excludedId ?? '']
+  );
+  return !existing;
 }
-async function insertTask(row: typeof tasks.$inferInsert): Promise<void> {
-  await dbRun(`INSERT INTO tasks (id,user_id,title,due_date,due_time,priority,status,category,client,meeting_id,notes,completed_at,reminder_lead_json,created_at,updated_at,deleted_at,version)
+async function scheduleUserReminders(database: DatabaseSession, userId: string, entity: 'meeting' | 'task', record: Record<string, unknown>): Promise<void> {
+  const settings = await database.get<{ timezone: string; prefs_json: string | null }>(
+    'SELECT users.timezone,reminder_prefs.prefs_json FROM users LEFT JOIN reminder_prefs ON reminder_prefs.user_id=users.id WHERE users.id=?',
+    [userId]
+  );
+  const reminderLeadJson = record.reminderLeadJson;
+  await scheduleEntityReminders(
+    userId,
+    entity,
+    {
+      ...record,
+      reminderLeadMinutes: typeof reminderLeadJson === 'string' ? JSON.parse(reminderLeadJson) as number[] | null : undefined
+    },
+    settings?.timezone ?? 'UTC',
+    JSON.parse(settings?.prefs_json ?? '{}') as Record<string, unknown>,
+    database
+  );
+}
+function duplicateTitle(entity: 'meeting' | 'task') {
+  return { error: { code: 'DUPLICATE_TITLE', message: `A ${entity} with this title already exists.` } };
+}
+async function insertMeeting(row: typeof meetings.$inferInsert, schedule = false): Promise<boolean> {
+  return dbTransaction(async (database) => {
+    if (!await assertUniqueTitle(database, 'meeting', row.userId, row.title)) return false;
+    await database.run(`INSERT INTO meetings (id,user_id,title,date,start,"end",client,contacts,type,location,notes,outcome,status,follow_up_date,reminder_lead_json,created_at,updated_at,deleted_at,version)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [row.id,row.userId,row.title,row.date,row.start,row.end,row.client,row.contacts,row.type,row.location,row.notes,row.outcome,row.status,row.followUpDate,row.reminderLeadJson,row.createdAt,row.updatedAt,row.deletedAt,row.version]);
+    if (schedule) await scheduleUserReminders(database, row.userId, 'meeting', row as Record<string, unknown>);
+    return true;
+  });
+}
+async function insertTask(row: typeof tasks.$inferInsert, schedule = false): Promise<boolean> {
+  return dbTransaction(async (database) => {
+    if (!await assertUniqueTitle(database, 'task', row.userId, row.title)) return false;
+    await database.run(`INSERT INTO tasks (id,user_id,title,due_date,due_time,priority,status,category,client,meeting_id,notes,completed_at,reminder_lead_json,created_at,updated_at,deleted_at,version)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-  [row.id,row.userId,row.title,row.dueDate,row.dueTime,row.priority,row.status,row.category,row.client,row.meetingId,row.notes,row.completedAt,row.reminderLeadJson,row.createdAt,row.updatedAt,row.deletedAt,row.version]);
+      [row.id,row.userId,row.title,row.dueDate,row.dueTime,row.priority,row.status,row.category,row.client,row.meetingId,row.notes,row.completedAt,row.reminderLeadJson,row.createdAt,row.updatedAt,row.deletedAt,row.version]);
+    if (schedule) await scheduleUserReminders(database, row.userId, 'task', row as Record<string, unknown>);
+    return true;
+  });
 }
 function meetingByIdSql(): string {
   return `SELECT id,user_id AS "userId",title,date,start,"end",client,contacts,type,location,notes,outcome,status,
@@ -173,12 +214,7 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const user = owner(request), parsed = meetingInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     const row = createMeetingRecord(parsed.data as Record<string, unknown>, user.id);
-    await insertMeeting(row);
-    const [account, prefsRow] = await Promise.all([
-      dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]),
-      dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id])
-    ]);
-    await scheduleEntityReminders(user.id, 'meeting', { ...row, reminderLeadMinutes: parsed.data.reminderLeadMinutes }, account?.timezone ?? 'UTC', JSON.parse(prefsRow?.prefs_json ?? '{}') as Record<string, unknown>);
+    if (!await insertMeeting(row, true)) return reply.code(409).send(duplicateTitle('meeting'));
     return reply.code(201).send({ item: row });
   });
 
@@ -202,11 +238,14 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const checked = meetingInputSchema.safeParse(row);
     if (!checked.success) return reply.code(400).send(validationFailure(checked.error.issues));
     const reminderLeadJson = leads === undefined ? existing.reminderLeadJson : leads === null ? 'null' : JSON.stringify(leads);
-    await dbRun(`UPDATE meetings SET title=?,date=?,start=?,"end"=?,client=?,contacts=?,type=?,location=?,notes=?,outcome=?,status=?,follow_up_date=?,reminder_lead_json=?,updated_at=?,version=? WHERE id=? AND user_id=?`,
-      [checked.data.title,checked.data.date,checked.data.start,checked.data.end,checked.data.client,checked.data.contacts,checked.data.type,checked.data.location,checked.data.notes,checked.data.outcome,checked.data.status,checked.data.followUpDate,reminderLeadJson,row.updatedAt,row.version,id,user.id]);
-    const account = await dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]);
-    const prefsRow = await dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id]);
-    await scheduleEntityReminders(user.id, 'meeting', row as Record<string, unknown>, account?.timezone ?? 'UTC', JSON.parse(prefsRow?.prefs_json ?? '{}') as Record<string, unknown>);
+    const updated = await dbTransaction(async (database) => {
+      if (!await assertUniqueTitle(database, 'meeting', user.id, checked.data.title, id)) return false;
+      await database.run(`UPDATE meetings SET title=?,date=?,start=?,"end"=?,client=?,contacts=?,type=?,location=?,notes=?,outcome=?,status=?,follow_up_date=?,reminder_lead_json=?,updated_at=?,version=? WHERE id=? AND user_id=?`,
+        [checked.data.title,checked.data.date,checked.data.start,checked.data.end,checked.data.client,checked.data.contacts,checked.data.type,checked.data.location,checked.data.notes,checked.data.outcome,checked.data.status,checked.data.followUpDate,reminderLeadJson,row.updatedAt,row.version,id,user.id]);
+      await scheduleUserReminders(database, user.id, 'meeting', { ...row, reminderLeadJson });
+      return true;
+    });
+    if (!updated) return reply.code(409).send(duplicateTitle('meeting'));
     return { item: row };
   });
 
@@ -217,7 +256,7 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const { id: ignoredId, createdAt: ignoredCreated, updatedAt: ignoredUpdated, deletedAt: ignoredDeleted, version: ignoredVersion, ...copy } = old;
     void ignoredId; void ignoredCreated; void ignoredUpdated; void ignoredDeleted; void ignoredVersion;
     const row = createMeetingRecord({ ...copy, title: `${old.title} (copy)`, status: 'Scheduled', outcome: '' }, user.id);
-    await insertMeeting(row);
+    if (!await insertMeeting(row)) return reply.code(409).send(duplicateTitle('meeting'));
     return reply.code(201).send({ item: row });
   });
 
@@ -262,12 +301,7 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     if (!await ownsMeeting(user.id, parsed.data.meetingId)) return reply.code(400).send(failure('INVALID_MEETING', 'Related meeting is not available to this account.'));
     const row = createTaskRecord(parsed.data as Record<string, unknown>, user.id);
-    await insertTask(row);
-    const [account, prefsRow] = await Promise.all([
-      dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]),
-      dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id])
-    ]);
-    await scheduleEntityReminders(user.id, 'task', { ...row, reminderLeadMinutes: parsed.data.reminderLeadMinutes }, account?.timezone ?? 'UTC', JSON.parse(prefsRow?.prefs_json ?? '{}') as Record<string, unknown>);
+    if (!await insertTask(row, true)) return reply.code(409).send(duplicateTitle('task'));
     return reply.code(201).send({ item: row });
   });
 
@@ -286,11 +320,14 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const checked = taskInputSchema.safeParse(row);
     if (!checked.success) return reply.code(400).send(validationFailure(checked.error.issues));
     const reminderLeadJson = leads === undefined ? existing.reminderLeadJson : leads === null ? 'null' : JSON.stringify(leads);
-    await dbRun('UPDATE tasks SET title=?,due_date=?,due_time=?,priority=?,status=?,category=?,client=?,meeting_id=?,notes=?,completed_at=?,reminder_lead_json=?,updated_at=?,version=? WHERE id=? AND user_id=?',
-      [checked.data.title,checked.data.dueDate,checked.data.dueTime,checked.data.priority,checked.data.status,checked.data.category,checked.data.client,checked.data.meetingId,checked.data.notes,checked.data.completedAt,reminderLeadJson,row.updatedAt,row.version,id,user.id]);
-    const account = await dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]);
-    const prefsRow = await dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id]);
-    await scheduleEntityReminders(user.id, 'task', row as Record<string, unknown>, account?.timezone ?? 'UTC', JSON.parse(prefsRow?.prefs_json ?? '{}') as Record<string, unknown>);
+    const updated = await dbTransaction(async (database) => {
+      if (!await assertUniqueTitle(database, 'task', user.id, checked.data.title, id)) return false;
+      await database.run('UPDATE tasks SET title=?,due_date=?,due_time=?,priority=?,status=?,category=?,client=?,meeting_id=?,notes=?,completed_at=?,reminder_lead_json=?,updated_at=?,version=? WHERE id=? AND user_id=?',
+        [checked.data.title,checked.data.dueDate,checked.data.dueTime,checked.data.priority,checked.data.status,checked.data.category,checked.data.client,checked.data.meetingId,checked.data.notes,checked.data.completedAt,reminderLeadJson,row.updatedAt,row.version,id,user.id]);
+      await scheduleUserReminders(database, user.id, 'task', { ...row, reminderLeadJson });
+      return true;
+    });
+    if (!updated) return reply.code(409).send(duplicateTitle('task'));
     return { item: row };
   });
 
@@ -338,7 +375,7 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const parsed = taskInputSchema.safeParse({ title, dueDate, dueTime, priority, status: 'To Do', category, client: '', meetingId: null, notes: '', completedAt: null });
     if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     const row = createTaskRecord(parsed.data as Record<string, unknown>, user.id);
-    await insertTask(row);
+    if (!await insertTask(row)) return reply.code(409).send(duplicateTitle('task'));
     return reply.code(201).send({ item: row });
   });
 
@@ -445,6 +482,9 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
       }
       const stamp = nowIso();
       for (const { item, legacyId } of meetingsIn) {
+        if (!await assertUniqueTitle(database, 'meeting', user.id, String(item.title))) {
+          throw Object.assign(new Error('A meeting with this title already exists.'), { statusCode: 409, code: 'DUPLICATE_TITLE' });
+        }
         const id = legacyId ? idMap.get(legacyId) ?? randomUUID() : randomUUID();
         const followUpDate = item.followUpDate ?? null;
         const reminderLeadJson = item.reminderLeadMinutes ? JSON.stringify(item.reminderLeadMinutes) : null;
@@ -454,6 +494,9 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
         if (legacyId) idMap.set(legacyId, id);
       }
       for (const item of tasksIn) {
+        if (!await assertUniqueTitle(database, 'task', user.id, String(item.title))) {
+          throw Object.assign(new Error('A task with this title already exists.'), { statusCode: 409, code: 'DUPLICATE_TITLE' });
+        }
         await database.run(`INSERT INTO tasks (id,user_id,title,due_date,due_time,priority,status,category,client,meeting_id,notes,completed_at,reminder_lead_json,created_at,updated_at,deleted_at,version)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,1)`,
         [randomUUID(),user.id,item.title,item.dueDate,item.dueTime || null,item.priority,item.status,item.category,item.client,item.meetingId || null,item.notes,item.completedAt || null,item.reminderLeadMinutes ? JSON.stringify(item.reminderLeadMinutes) : null,stamp,stamp]);

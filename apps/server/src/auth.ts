@@ -1,5 +1,7 @@
 import { createHmac, randomInt, randomUUID } from 'node:crypto';
-import { OtpRequestSchema, OtpVerifySchema } from '@zarghamflow/shared';
+import {
+  EmailChangeRequestSchema, EmailChangeVerifySchema, OtpRequestSchema, OtpSignupSchema, OtpVerifySchema, ProfileUpdateSchema
+} from '@zarghamflow/shared';
 import { config } from './config.js';
 import { dbAll, dbGet, dbRun, dbTransaction, isPostgres, type DatabaseSession } from './db/index.js';
 import { sendMail } from './mail.js';
@@ -18,15 +20,18 @@ const SEND_LIMITS = { windowMs: SEND_WINDOW_MS, ipLimit: 20, emailLimit: 5 };
 const VERIFY_LIMITS = { windowMs: VERIFY_WINDOW_MS, ipLimit: 20, emailLimit: 10 };
 const iso = (date: Date): string => date.toISOString();
 
-type UserRow = { id: string; email: string; timezone: string; locale: string; settings_json: string; role: 'admin'|'user'; active: number };
-type SessionRow = { id: string; user_id: string; token_hash: string; expires_at: string; email: string; role: 'admin'|'user'; active: number };
+type UserRow = { id: string; email: string; timezone: string; locale: string; settings_json: string; role: 'admin'|'user'; active: number; first_name: string; last_name: string };
+type SessionRow = { id: string; user_id: string; token_hash: string; expires_at: string; email: string; role: 'admin'|'user'; active: number; first_name: string; last_name: string };
 type RateLimitResult = { limited: boolean; retryAfterSeconds: number };
 type RatePolicy = { windowMs: number; ipLimit: number; emailLimit: number };
-type OtpIssueResult = RateLimitResult;
+type OtpIssueResult = RateLimitResult & { kind?: 'account_exists' | 'account_not_found' | 'account_disabled' };
 type OtpVerifyResult =
-  | { kind: 'verified'; user: { email: string; role: 'admin' | 'user' }; rawSession: string }
+  | { kind: 'verified'; user: { email: string; role: 'admin' | 'user'; firstName: string; lastName: string }; rawSession: string }
   | { kind: 'invalid' }
   | { kind: 'expired' }
+  | { kind: 'account_exists' }
+  | { kind: 'account_not_found' }
+  | { kind: 'account_disabled' }
   | { kind: 'too_many_attempts'; retryAfterSeconds: number }
   | { kind: 'rate_limited'; retryAfterSeconds: number };
 
@@ -97,21 +102,33 @@ export async function cleanupExpiredOtps(): Promise<void> {
   const now = new Date();
   await dbRun('DELETE FROM auth_otps WHERE expires_at<? OR (consumed_at IS NOT NULL AND created_at<?)',
     [iso(now), iso(new Date(now.getTime() - OTP_LIFETIME_MS))]);
+  await dbRun('DELETE FROM email_change_otps WHERE expires_at<? OR (consumed_at IS NOT NULL AND created_at<?)',
+    [iso(new Date(now.getTime() - SEND_WINDOW_MS)), iso(new Date(now.getTime() - SEND_WINDOW_MS))]);
 }
 
-export async function requestOtp(email: string, ipHash: string): Promise<OtpIssueResult> {
+export async function requestOtp(
+  email: string,
+  ipHash: string,
+  flow: 'signup' | 'login' = 'signup',
+  firstName = '',
+  lastName = ''
+): Promise<OtpIssueResult> {
   const normalizedEmail = email.trim().toLowerCase();
   const now = new Date();
   const emailHash = hashIp(normalizedEmail);
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const id = randomUUID();
   await cleanupExpiredOtps();
-  const issue = await dbTransaction(async (database) => {
+  const issue = await dbTransaction<OtpIssueResult>(async (database) => {
     await lockRateKeys(database, 'signup', ipHash, emailHash);
     const rate = await checkRate(database, 'signup', ipHash, emailHash, now, SEND_LIMITS);
     if (rate.limited) return rate;
     await database.run('INSERT INTO auth_rate_limits (id,kind,ip_hash,email_hash,created_at) VALUES (?,?,?,?,?)',
       [randomUUID(), 'signup', ipHash, emailHash, iso(now)]);
+    const existing = await database.get<{ id: string; active: number }>('SELECT id,active FROM users WHERE lower(email)=lower(?)', [normalizedEmail]);
+    if (flow === 'signup' && existing) return { limited: false, retryAfterSeconds: 0, kind: 'account_exists' as const };
+    if (flow === 'login' && !existing) return { limited: false, retryAfterSeconds: 0, kind: 'account_not_found' as const };
+    if (flow === 'login' && existing && !existing.active) return { limited: false, retryAfterSeconds: 0, kind: 'account_disabled' as const };
     const lastOtp = await database.get<{ created_at: string }>(
       'SELECT created_at FROM auth_otps WHERE email=? ORDER BY created_at DESC LIMIT 1', [normalizedEmail]);
     if (lastOtp && now.getTime() - Date.parse(lastOtp.created_at) < OTP_RESEND_COOLDOWN_MS) {
@@ -122,13 +139,13 @@ export async function requestOtp(email: string, ipHash: string): Promise<OtpIssu
     }
     await database.run('UPDATE auth_otps SET consumed_at=? WHERE email=? AND consumed_at IS NULL', [iso(now), normalizedEmail]);
     await database.run(
-      'INSERT INTO auth_otps (id,email,code_hash,expires_at,attempts,consumed_at,created_at,ip_hash) VALUES (?,?,?,?,0,NULL,?,?)',
-      [id, normalizedEmail, hashOtp(normalizedEmail, code), iso(new Date(now.getTime() + OTP_LIFETIME_MS)), iso(now), ipHash]
+      'INSERT INTO auth_otps (id,email,code_hash,expires_at,attempts,consumed_at,created_at,ip_hash,flow,first_name,last_name) VALUES (?,?,?,?,0,NULL,?,?,?,?,?)',
+      [id, normalizedEmail, hashOtp(normalizedEmail, code), iso(new Date(now.getTime() + OTP_LIFETIME_MS)), iso(now), ipHash, flow, firstName.trim(), lastName.trim()]
     );
     await database.run('DELETE FROM auth_rate_limits WHERE created_at<?', [iso(new Date(now.getTime() - 24 * 60 * 60 * 1000))]);
     return { limited: false, retryAfterSeconds: 0 };
   });
-  if (issue.limited) return issue;
+  if (issue.limited || issue.kind) return issue;
 
   const text = `Your ZarghamFlow code is ${code}. It expires in 10 minutes. If you didn't request it, ignore this email.`;
   const html = `<p>Your ZarghamFlow code is <strong>${code}</strong>. It expires in 10 minutes.</p><p>If you didn't request it, ignore this email.</p>`;
@@ -160,9 +177,10 @@ export async function verifyOtp(
   const expiresAt = iso(new Date(now.getTime() + SESSION_MS));
   const result = await dbTransaction(async (database) => {
     const otp = await database.get<{
-      id: string; code_hash: string; expires_at: string; attempts: number; consumed_at: string | null; created_at: string
+      id: string; code_hash: string; expires_at: string; attempts: number; consumed_at: string | null; created_at: string;
+      flow: 'signup' | 'login'; first_name: string; last_name: string
     }>(
-      `SELECT id,code_hash,expires_at,attempts,consumed_at,created_at FROM auth_otps WHERE email=? ORDER BY created_at DESC LIMIT 1${isPostgres ? ' FOR UPDATE' : ''}`,
+      `SELECT id,code_hash,expires_at,attempts,consumed_at,created_at,flow,first_name,last_name FROM auth_otps WHERE email=? ORDER BY created_at DESC LIMIT 1${isPostgres ? ' FOR UPDATE' : ''}`,
       [normalizedEmail]
     );
     if (!otp) return { kind: 'invalid' } as const;
@@ -194,9 +212,11 @@ export async function verifyOtp(
     if (!consumed.changes) return { kind: 'invalid' } as const;
 
     const current = await database.get<UserRow>(
-      'SELECT id,email,timezone,locale,settings_json,role,active FROM users WHERE lower(email)=lower(?)', [normalizedEmail]
+      'SELECT id,email,timezone,locale,settings_json,role,active,first_name,last_name FROM users WHERE lower(email)=lower(?)', [normalizedEmail]
     );
-    if (current && !current.active) return { kind: 'invalid' } as const;
+    if (current && !current.active) return { kind: 'account_disabled' } as const;
+    if (otp.flow === 'signup' && current) return { kind: 'account_exists' } as const;
+    if (otp.flow === 'login' && !current) return { kind: 'account_not_found' } as const;
 
     const configuredAdmin = config.ADMIN_EMAIL?.trim().toLowerCase();
     const allowFirstUserAdmin = config.NODE_ENV === 'development' || config.NODE_ENV === 'test';
@@ -211,11 +231,11 @@ export async function verifyOtp(
       user = current;
     } else {
       const role = configuredAdmin
-        ? (email === configuredAdmin ? 'admin' : 'user')
+        ? (normalizedEmail === configuredAdmin ? 'admin' : 'user')
         : (allowFirstUserAdmin && !hasAdmin ? 'admin' : 'user');
-      user = { id: randomUUID(), email: normalizedEmail, timezone: 'UTC', locale: 'en-GB', settings_json: '{}', role, active: 1 };
-      await database.run('INSERT INTO users (id,email,timezone,locale,settings_json,role,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)',
-        [user.id, user.email, user.timezone, user.locale, user.settings_json, user.role, user.active, nowIso, nowIso]);
+      user = { id: randomUUID(), email: normalizedEmail, timezone: 'UTC', locale: 'en-GB', settings_json: '{}', role, active: 1, first_name: otp.first_name, last_name: otp.last_name };
+      await database.run('INSERT INTO users (id,email,timezone,locale,settings_json,role,active,created_at,updated_at,first_name,last_name) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+        [user.id, user.email, user.timezone, user.locale, user.settings_json, user.role, user.active, nowIso, nowIso, user.first_name, user.last_name]);
       await database.run('INSERT INTO reminder_prefs (user_id,prefs_json,updated_at) VALUES (?,?,?)', [user.id, JSON.stringify({}), nowIso]);
     }
 
@@ -227,7 +247,7 @@ export async function verifyOtp(
       [sessionId, user.id, sha256(rawSession), device, ipHash, nowIso, nowIso, expiresAt]);
     await database.run('INSERT INTO audit_log (id,user_id,event,details_json,ip_hash,created_at) VALUES (?,?,?,?,?,?)',
       [randomUUID(), user.id, 'sign_in', JSON.stringify({ device }), ipHash, nowIso]);
-    return { kind: 'verified', user: { email: user.email, role: user.role }, rawSession } as const;
+    return { kind: 'verified', user: { email: user.email, role: user.role, firstName: user.first_name, lastName: user.last_name }, rawSession } as const;
   });
   return result;
 }
@@ -243,19 +263,46 @@ export function registerAuth(app: ApiApp): void {
 
   const requestOtpHandler = async (request: ApiRequest, reply: ApiReply) => {
     const ipHash = hashIp(request.ip);
-    const generic = { ok: true, message: 'If the address is eligible, a sign-in code will arrive shortly.' };
     const parsed = OtpRequestSchema.safeParse(request.body);
-    const issue = parsed.success
-      ? await requestOtp(parsed.data.email, ipHash)
+    const issue: OtpIssueResult = parsed.success
+      ? await requestOtp(parsed.data.email, ipHash, 'signup')
       : await recordAuthAttempt('signup', ipHash, undefined, SEND_LIMITS);
     if (issue.limited) {
       reply.header('retry-after', String(issue.retryAfterSeconds));
       return reply.code(429).send({ error: { code: 'RATE_LIMITED', message: 'Please wait before requesting another code.' } });
     }
-    return reply.code(200).send(generic);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Enter a valid email address.' } });
+    if (issue.kind === 'account_exists') return reply.code(409).send({ error: { code: 'ACCOUNT_EXISTS', message: 'An account with this email already exists. Sign in instead.' } });
+    return reply.code(200).send({ ok: true, message: 'A verification code was sent to your email.' });
+  };
+  const signupOtpHandler = async (request: ApiRequest, reply: ApiReply) => {
+    const ipHash = hashIp(request.ip);
+    const parsed = OtpSignupSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Enter your first name, last name, and a valid email address.' } });
+    const issue = await requestOtp(parsed.data.email, ipHash, 'signup', parsed.data.firstName, parsed.data.lastName);
+    if (issue.limited) {
+      reply.header('retry-after', String(issue.retryAfterSeconds));
+      return reply.code(429).send({ error: { code: 'RATE_LIMITED', message: 'Please wait before requesting another code.' } });
+    }
+    if (issue.kind === 'account_exists') return reply.code(409).send({ error: { code: 'ACCOUNT_EXISTS', message: 'An account with this email already exists. Sign in instead.' } });
+    return reply.code(200).send({ ok: true, message: 'A verification code was sent to your email.' });
+  };
+  const loginOtpHandler = async (request: ApiRequest, reply: ApiReply) => {
+    const ipHash = hashIp(request.ip);
+    const parsed = OtpRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Enter a valid email address.' } });
+    const issue = await requestOtp(parsed.data.email, ipHash, 'login');
+    if (issue.limited) {
+      reply.header('retry-after', String(issue.retryAfterSeconds));
+      return reply.code(429).send({ error: { code: 'RATE_LIMITED', message: 'Please wait before requesting another code.' } });
+    }
+    if (issue.kind === 'account_not_found') return reply.code(404).send({ error: { code: 'ACCOUNT_NOT_FOUND', message: 'No account was found for this email. Sign up first.' } });
+    if (issue.kind === 'account_disabled') return reply.code(403).send({ error: { code: 'ACCOUNT_DISABLED', message: 'Your account has been disabled. Please contact the admin to have your account enabled.' } });
+    return reply.code(200).send({ ok: true, message: 'A sign-in code was sent to your email.' });
   };
   app.post('/api/v1/auth/request', requestOtpHandler);
-  app.post('/api/v1/auth/signup', requestOtpHandler);
+  app.post('/api/v1/auth/signup', signupOtpHandler);
+  app.post('/api/v1/auth/login', loginOtpHandler);
 
   app.post('/api/v1/auth/verify', async (request, reply) => {
     const ipHash = hashIp(request.ip);
@@ -289,6 +336,15 @@ export function registerAuth(app: ApiApp): void {
     if (result.kind === 'invalid') {
       return reply.code(400).send({ error: { code: 'INVALID_CODE', message: 'This code is invalid or expired. Request a new one.' } });
     }
+    if (result.kind === 'account_exists') {
+      return reply.code(409).send({ error: { code: 'ACCOUNT_EXISTS', message: 'An account with this email already exists. Sign in instead.' } });
+    }
+    if (result.kind === 'account_not_found') {
+      return reply.code(404).send({ error: { code: 'ACCOUNT_NOT_FOUND', message: 'No account was found for this email. Sign up first.' } });
+    }
+    if (result.kind === 'account_disabled') {
+      return reply.code(403).send({ error: { code: 'ACCOUNT_DISABLED', message: 'Your account has been disabled. Please contact the admin to have your account enabled.' } });
+    }
     reply.setCookie(SESSION_COOKIE, result.rawSession, { ...cookieOptions(secure), maxAge: SESSION_MS / 1000 });
     return reply.send({
       ok: true,
@@ -306,26 +362,38 @@ export function registerAuth(app: ApiApp): void {
         return reply.code(403).send({ error: { code: 'CSRF_INVALID', message: 'Request verification failed. Refresh and retry.' } });
       }
     }
-    if (request.url.startsWith('/api/v1/auth/request') || request.url.startsWith('/api/v1/auth/signup') || request.url.startsWith('/api/v1/auth/verify') || request.url.startsWith('/api/v1/auth/actions/')) return;
+    if (request.url.startsWith('/api/v1/auth/request') || request.url.startsWith('/api/v1/auth/signup') || request.url.startsWith('/api/v1/auth/login') || request.url.startsWith('/api/v1/auth/verify') || request.url.startsWith('/api/v1/auth/actions/')) return;
     const rawSession = request.cookies[SESSION_COOKIE];
     if (!rawSession) return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Sign in required.' } });
-    const session = await dbGet<SessionRow>(`SELECT sessions.id,sessions.user_id,sessions.token_hash,sessions.expires_at,users.email,users.role,users.active
+    const session = await dbGet<SessionRow & { revoked_at: string | null }>(`SELECT sessions.id,sessions.user_id,sessions.token_hash,sessions.expires_at,sessions.revoked_at,users.email,users.role,users.active,users.first_name,users.last_name
       FROM sessions JOIN users ON users.id = sessions.user_id
-      WHERE sessions.token_hash = ? AND sessions.revoked_at IS NULL`, [sha256(rawSession)]);
-    if (!session || !session.active || session.expires_at <= iso(new Date())) {
-      if (session) await dbRun('UPDATE sessions SET revoked_at = ? WHERE id = ?', [iso(new Date()), session.id]);
+      WHERE sessions.token_hash = ?`, [sha256(rawSession)]);
+    if (session && !session.active) {
+      await dbRun('UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL', [iso(new Date()), session.id]);
+      reply.clearCookie(SESSION_COOKIE, cookieOptions(secure));
+      return reply.code(403).send({ error: { code: 'ACCOUNT_DISABLED', message: 'Your account has been disabled. Please contact the admin to have your account enabled.' } });
+    }
+    if (!session || session.revoked_at || session.expires_at <= iso(new Date())) {
+      if (session && !session.revoked_at) await dbRun('UPDATE sessions SET revoked_at = ? WHERE id = ?', [iso(new Date()), session.id]);
       reply.clearCookie(SESSION_COOKIE, cookieOptions(secure));
       return reply.code(401).send({ error: { code: 'UNAUTHORIZED', message: 'Sign in required.' } });
     }
     const nextExpiry = iso(new Date(Date.now() + SESSION_MS));
     await dbRun('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ?', [iso(new Date()), nextExpiry, session.id]);
     reply.setCookie(SESSION_COOKIE, rawSession, { ...cookieOptions(secure), maxAge: SESSION_MS / 1000 });
-    request.owner = { id: session.user_id, email: session.email, role: session.role, sessionId: session.id };
+    request.owner = { id: session.user_id, email: session.email, role: session.role, sessionId: session.id, firstName: session.first_name, lastName: session.last_name };
     const csrfToken = request.cookies[CSRF_COOKIE];
     if (csrfToken) request.csrfToken = csrfToken;
   });
 
-  app.get('/api/v1/auth/me', async (request) => ({ user: { email: request.owner?.email, role: request.owner?.role } }));
+  app.get('/api/v1/auth/me', async (request) => ({
+    user: {
+      email: request.owner?.email,
+      role: request.owner?.role,
+      firstName: request.owner?.firstName,
+      lastName: request.owner?.lastName
+    }
+  }));
 
   app.post('/api/v1/auth/logout', async (request, reply) => {
     if (request.owner) await dbRun('UPDATE sessions SET revoked_at = ? WHERE id = ?', [iso(new Date()), request.owner.sessionId]);
@@ -338,6 +406,115 @@ export function registerAuth(app: ApiApp): void {
     if (owner) await dbRun('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL', [iso(new Date()), owner.id]);
     reply.clearCookie(SESSION_COOKIE, cookieOptions(secure));
     return { ok: true };
+  });
+
+  app.patch('/api/v1/auth/profile', async (request, reply) => {
+    const parsed = ProfileUpdateSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'VALIDATION_ERROR', message: 'Enter your first and last name.' } });
+    const now = iso(new Date());
+    await dbRun('UPDATE users SET first_name=?,last_name=?,updated_at=? WHERE id=?',
+      [parsed.data.firstName, parsed.data.lastName, now, request.owner!.id]);
+    return { user: { ...request.owner!, firstName: parsed.data.firstName, lastName: parsed.data.lastName } };
+  });
+
+  app.post('/api/v1/auth/email-change/request', async (request, reply) => {
+    const parsed = EmailChangeRequestSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_INPUT', message: 'Enter a valid email address.' } });
+    const user = request.owner!;
+    const email = parsed.data.email;
+    if (email === user.email.toLowerCase()) return reply.code(400).send({ error: { code: 'EMAIL_UNCHANGED', message: 'Enter a different email address.' } });
+    const now = new Date();
+    const nowIso = iso(now);
+    const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+    const issue = await dbTransaction(async (database) => {
+      if (isPostgres) await database.get('SELECT pg_advisory_xact_lock(hashtext(?)) AS locked', [`email-change:${email}`]);
+      const existing = await database.get<{ id: string }>('SELECT id FROM users WHERE lower(email)=lower(?)', [email]);
+      if (existing) return { kind: 'exists' as const };
+      const last = await database.get<{ created_at: string }>(
+        'SELECT created_at FROM email_change_otps WHERE user_id=? ORDER BY created_at DESC LIMIT 1', [user.id]
+      );
+      if (last && now.getTime() - Date.parse(last.created_at) < OTP_RESEND_COOLDOWN_MS) {
+        return { kind: 'limited' as const, retryAfterSeconds: Math.max(1, Math.ceil((OTP_RESEND_COOLDOWN_MS - (now.getTime() - Date.parse(last.created_at))) / 1000)) };
+      }
+      const windowStart = iso(new Date(now.getTime() - SEND_WINDOW_MS));
+      const sends = await database.get<{ count: number | string; oldest: string | null }>(
+        'SELECT COUNT(*) AS count,MIN(created_at) AS oldest FROM email_change_otps WHERE user_id=? AND created_at>?',
+        [user.id, windowStart]
+      );
+      if (Number(sends?.count ?? 0) >= 5) {
+        return {
+          kind: 'limited' as const,
+          retryAfterSeconds: Math.max(1, Math.ceil((SEND_WINDOW_MS - (now.getTime() - Date.parse(sends?.oldest ?? nowIso))) / 1000))
+        };
+      }
+      await database.run('UPDATE email_change_otps SET consumed_at=? WHERE user_id=? AND consumed_at IS NULL', [nowIso, user.id]);
+      await database.run(
+        'INSERT INTO email_change_otps (id,user_id,email,code_hash,expires_at,attempts,consumed_at,created_at,ip_hash) VALUES (?,?,?,?,?,0,NULL,?,?)',
+        [randomUUID(), user.id, email, hashOtp(email, code), iso(new Date(now.getTime() + OTP_LIFETIME_MS)), nowIso, hashIp(request.ip)]
+      );
+      return { kind: 'sent' as const };
+    });
+    if (issue.kind === 'exists') return reply.code(409).send({ error: { code: 'EMAIL_IN_USE', message: 'That email address is already associated with an account.' } });
+    if (issue.kind === 'limited') {
+      reply.header('retry-after', String(issue.retryAfterSeconds));
+      return reply.code(429).send({ error: { code: 'RATE_LIMITED', message: 'Please wait before requesting another code.' } });
+    }
+    const text = `Your ZarghamFlow email change code is ${code}. It expires in 10 minutes. If you didn't request it, ignore this email.`;
+    const html = `<p>Your ZarghamFlow email change code is <strong>${code}</strong>. It expires in 10 minutes.</p><p>If you didn't request it, ignore this email.</p>`;
+    try {
+      await sendMail(email, 'Verify your new ZarghamFlow email', text, html);
+    } catch (error) {
+      console.error('Email change code delivery failed.', error);
+      if (config.NODE_ENV === 'development') console.info(`Development email change OTP for ${email}: ${code}`);
+    }
+    return { ok: true, message: 'A verification code was sent to your new email address.' };
+  });
+
+  app.post('/api/v1/auth/email-change/verify', async (request, reply) => {
+    const parsed = EmailChangeVerifySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: { code: 'INVALID_CODE', message: 'Enter the 6-digit code sent to your new email address.' } });
+    const user = request.owner!;
+    const email = parsed.data.email;
+    const now = new Date();
+    const nowIso = iso(now);
+    const result = await dbTransaction(async (database) => {
+      const otp = await database.get<{
+        id: string; code_hash: string; expires_at: string; attempts: number; consumed_at: string | null
+      }>(
+        `SELECT id,code_hash,expires_at,attempts,consumed_at FROM email_change_otps
+         WHERE user_id=? AND email=? ORDER BY created_at DESC LIMIT 1${isPostgres ? ' FOR UPDATE' : ''}`,
+        [user.id, email]
+      );
+      if (!otp || otp.consumed_at) return { kind: 'invalid' as const };
+      if (otp.expires_at <= nowIso) {
+        await database.run('UPDATE email_change_otps SET consumed_at=? WHERE id=?', [nowIso, otp.id]);
+        return { kind: 'expired' as const };
+      }
+      if (otp.attempts >= OTP_MAX_ATTEMPTS) return { kind: 'locked' as const };
+      if (!safeEqual(otp.code_hash, hashOtp(email, parsed.data.code))) {
+        const attempts = otp.attempts + 1;
+        await database.run('UPDATE email_change_otps SET attempts=?,consumed_at=? WHERE id=?',
+          [attempts, attempts >= OTP_MAX_ATTEMPTS ? nowIso : null, otp.id]);
+        return { kind: attempts >= OTP_MAX_ATTEMPTS ? 'locked' as const : 'invalid' as const };
+      }
+      if (isPostgres) await database.get('SELECT pg_advisory_xact_lock(hashtext(?)) AS locked', [`email-change:${email}`]);
+      const collision = await database.get<{ id: string }>('SELECT id FROM users WHERE lower(email)=lower(?) AND id<>?', [email, user.id]);
+      if (collision) return { kind: 'exists' as const };
+      const consumed = await database.run('UPDATE email_change_otps SET consumed_at=? WHERE id=? AND consumed_at IS NULL', [nowIso, otp.id]);
+      if (!consumed.changes) return { kind: 'invalid' as const };
+      const updated = await database.run('UPDATE users SET email=?,updated_at=? WHERE id=? AND lower(email)=lower(?)',
+        [email, nowIso, user.id, user.email]);
+      if (!updated.changes) return { kind: 'invalid' as const };
+      await database.run('UPDATE sessions SET last_seen_at=? WHERE user_id=? AND revoked_at IS NULL', [nowIso, user.id]);
+      await database.run('INSERT INTO audit_log(id,user_id,event,details_json,ip_hash,created_at) VALUES(?,?,?,?,?,?)',
+        [randomUUID(), user.id, 'email_changed', JSON.stringify({ previousEmail: user.email, email }), hashIp(request.ip), nowIso]);
+      return { kind: 'verified' as const };
+    });
+    if (result.kind === 'exists') return reply.code(409).send({ error: { code: 'EMAIL_IN_USE', message: 'That email address is already associated with an account.' } });
+    if (result.kind === 'expired') return reply.code(400).send({ error: { code: 'EXPIRED_CODE', message: 'This code expired. Request a new one.' } });
+    if (result.kind === 'locked') return reply.code(429).send({ error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many incorrect codes. Request a new code.' } });
+    if (result.kind === 'invalid') return reply.code(400).send({ error: { code: 'INVALID_CODE', message: 'This code is invalid or expired. Request a new one.' } });
+    return { ok: true, user: { ...user, email } };
   });
 
   app.get('/api/v1/auth/sessions', async (request) => {

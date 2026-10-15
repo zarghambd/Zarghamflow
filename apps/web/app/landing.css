@@ -3,6 +3,7 @@
 .tk-h2 { max-width: 640px; font-size: clamp(30px, 4vw, 44px); font-weight: 800; }
 .tk-header { display: flex; min-height: 84px; align-items: center; justify-content: space-between; gap: 20px; padding-block: 16px; }
 .tk-logo { display: flex; align-items: center; gap: 10px; font: 800 24px var(--tk-font-display); }
+.tk-logo-byline { color: var(--tk-ink-3); font: 700 13px var(--tk-font-body); }
 .tk-nav { display: flex; gap: 32px; font-weight: 500; }
 .tk-header-actions { display: flex; gap: 12px; }
 .tk-btn { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; padding: 0 24px; border: 1px solid transparent; border-radius: var(--tk-radius-md); cursor: pointer; font: 700 16px var(--tk-font-body); transition: background .15s; }

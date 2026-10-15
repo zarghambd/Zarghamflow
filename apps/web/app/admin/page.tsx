@@ -31,6 +31,7 @@ async function fetchUsers(filters: Filters): Promise<UserList> {
   if (!response.ok) {
     throw Object.assign(new Error(data.error?.message ?? `Request failed (${response.status})`), {
       status: response.status,
+      code: data.error?.code,
     });
   }
   return data as UserList;
@@ -49,7 +50,7 @@ export default function AdminPage() {
   const [savingId, setSavingId] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [accessStatus, setAccessStatus] = useState<'loading' | 'allowed' | 'unauthorized' | 'forbidden'>('loading');
+  const [accessStatus, setAccessStatus] = useState<'loading' | 'allowed' | 'unauthorized' | 'forbidden' | 'disabled'>('loading');
 
   async function loadUsers(nextFilters = filters) {
     setLoading(true);
@@ -64,7 +65,8 @@ export default function AdminPage() {
       setAccessStatus('allowed');
     } catch (loadError) {
       const status = (loadError as Error & { status?: number }).status;
-      setAccessStatus(status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : 'allowed');
+      const code = (loadError as Error & { code?: string }).code;
+      setAccessStatus(code === 'ACCOUNT_DISABLED' ? 'disabled' : status === 401 ? 'unauthorized' : status === 403 ? 'forbidden' : 'allowed');
       setError((loadError as Error).message);
     } finally {
       setLoading(false);
@@ -106,8 +108,10 @@ export default function AdminPage() {
 
   const accessMessage = accessStatus === 'unauthorized'
     ? 'Sign in with an administrator account to manage users.'
-    : accessStatus === 'forbidden'
-      ? 'Your account does not have administrator access.'
+    : accessStatus === 'disabled'
+      ? 'Your account has been disabled. Please contact the admin to have your account enabled.'
+      : accessStatus === 'forbidden'
+        ? 'Your account does not have administrator access.'
       : '';
 
   return (
@@ -117,12 +121,17 @@ export default function AdminPage() {
           <p className="eyebrow">Taskora / Administration</p>
           <h1>User management</h1>
         </div>
-        {accessStatus === 'allowed' && <div className="admin-count"><strong>{total}</strong><span>accounts</span></div>}
+        {accessStatus === 'allowed' && (
+          <div className="row">
+            <a className="secondary-btn" href="/planner">Open Tasks and Meetings</a>
+            <div className="admin-count"><strong>{total}</strong><span>accounts</span></div>
+          </div>
+        )}
       </header>
 
       {accessMessage ? (
         <section className="card admin-message" role="status">
-          <h2>{accessStatus === 'unauthorized' ? 'Administrator sign-in required' : 'Access denied'}</h2>
+          <h2>{accessStatus === 'unauthorized' ? 'Administrator sign-in required' : accessStatus === 'disabled' ? 'Account disabled' : 'Access denied'}</h2>
           <p>{accessMessage}</p>
           <a className="secondary-btn" href="/signin">Go to sign in</a>
         </section>
@@ -159,7 +168,7 @@ export default function AdminPage() {
                 <span>Status</span>
                 <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value)}>
                   <option value="">All statuses</option>
-                  <option value="true">Active</option>
+                  <option value="true">Enabled</option>
                   <option value="false">Disabled</option>
                 </select>
               </label>
@@ -180,7 +189,7 @@ export default function AdminPage() {
                       <div className="admin-user-email">{user.email}{isCurrent && <span className="admin-you">You</span>}</div>
                       <div className="admin-user-meta">
                         <span className={`admin-tag ${user.role === 'admin' ? 'admin-tag-role' : ''}`}>{user.role === 'admin' ? 'Administrator' : 'User'}</span>
-                        <span className={`admin-tag ${isActive ? 'admin-tag-active' : 'admin-tag-disabled'}`}>{isActive ? 'Active' : 'Disabled'}</span>
+                        <span className={`admin-tag ${isActive ? 'admin-tag-active' : 'admin-tag-disabled'}`}>{isActive ? 'Enabled' : 'Disabled'}</span>
                         <span>Joined {new Date(user.created_at).toLocaleDateString()}</span>
                       </div>
                     </div>

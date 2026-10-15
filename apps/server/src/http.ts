@@ -120,7 +120,10 @@ class ApiRouter implements ApiTestApp {
     if (!bucket || current - bucket.start >= 60_000) this.buckets.set(ip, { start: current, count: 1 });
     else bucket.count++;
     if ((this.buckets.get(ip)?.count ?? 0) > config.RATE_LIMIT_MAX) {
-      return Response.json({ error: { code: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' } }, { status: 429, headers: defaultHeaders });
+      const retryAfter = Math.max(1, Math.ceil((60_000 - (current - (this.buckets.get(ip)?.start ?? current))) / 1000));
+      return Response.json({
+        error: { code: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' }
+      }, { status: 429, headers: { ...defaultHeaders, 'retry-after': String(retryAfter) } });
     }
     if (this.buckets.size > 10_000) {
       for (const [key, value] of this.buckets) if (current - value.start >= 60_000) this.buckets.delete(key);

@@ -19,6 +19,7 @@
     "test:e2e": "npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server && npm run test:e2e --workspace @zarghamflow/web",
     "audit": "npm audit --omit=dev",
     "db:migrate": "npm run db:migrate --workspace @zarghamflow/server",
+    "db:import-sqlite": "npm run db:import-sqlite --workspace @zarghamflow/server --",
     "db:seed": "npm run db:seed --workspace @zarghamflow/server"
   },
   "devDependencies": {

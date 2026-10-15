@@ -25,6 +25,8 @@ Prerequisites: Node.js 20+ (Node 22 recommended) and npm.
 
 Database migrations are applied when the API is first used. For explicit migration, run `npm run db:migrate`. Use `npm run db:seed` only in development/test mode to add sample records.
 
+To copy a current ZarghamFlow SQLite database into PostgreSQL, set `DATABASE_URL` to the destination and run `npm run db:import-sqlite -- .\\data\\zarghamflow.sqlite --dry-run` first; omit `--dry-run` to perform the import. The source file is opened read-only, and its users, planner records, sessions, reminders, and related data are merged with IDs and versions preserved. Existing destination rows are not overwritten; conflicting unique IDs or values abort the transaction. Destination schema migrations are applied before import, and each table's inserted row count is verified. A dry run rolls back imported rows (schema migrations may still be applied).
+
 ## Environment Variables
 
 | Variable | Purpose | Default/example |

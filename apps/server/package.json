@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --pool=threads --maxWorkers=1 --minWorkers=1",
     "db:migrate": "tsx src/migrate.ts",
+    "db:import-sqlite": "tsx src/import-sqlite.ts",
     "db:seed": "tsx src/seed.ts",
     "db:backup": "tsx src/backup.ts"
   },

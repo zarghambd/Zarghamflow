@@ -119,6 +119,7 @@ The worker claims due rows transactionally (`pending` → `processing`), records
 - `npm run lint`
 - `npm run typecheck`
 - `npm test`
+- `npm run test:e2e` (requires Playwright Chromium)
 - `npm run build`
 - `npm run audit`
 

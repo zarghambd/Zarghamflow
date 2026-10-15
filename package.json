@@ -16,6 +16,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint apps packages --max-warnings=0",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run build --workspace @zarghamflow/shared && npm run build --workspace @zarghamflow/server && npm run test:e2e --workspace @zarghamflow/web",
     "audit": "npm audit --omit=dev",
     "db:migrate": "npm run db:migrate --workspace @zarghamflow/server",
     "db:seed": "npm run db:seed --workspace @zarghamflow/server"

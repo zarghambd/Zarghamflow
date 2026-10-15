@@ -241,6 +241,12 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     return { items, total, ...paging.data };
   });
 
+  app.get('/api/v1/tasks/:id', async (request, reply) => {
+    const user = owner(request), { id } = request.params as { id: string };
+    const item = await dbGet<typeof tasks.$inferSelect>(`${taskByIdSql()} WHERE id=? AND user_id=? AND deleted_at IS NULL`, [id, user.id]);
+    return item ? { item } : reply.code(404).send(failure('NOT_FOUND', 'Task not found.'));
+  });
+
   app.post('/api/v1/tasks', async (request, reply) => {
     const user = owner(request), parsed = taskInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(failure('VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid task.'));
@@ -411,9 +417,14 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     const user = owner(request), parsed = importSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send(failure('VALIDATION_ERROR', 'Import must include meetings and/or tasks arrays.'));
     const { data, mode } = parsed.data;
-    const meetingsIn = data.meetings.map(parseOldMeeting).filter((item): item is Record<string, unknown> => item !== null);
+    const meetingsIn = data.meetings.flatMap((value) => {
+      const item = parseOldMeeting(value);
+      if (!item) return [];
+      const source = value as Record<string, unknown>;
+      return [{ item, legacyId: typeof source.id === 'string' ? source.id : '' }];
+    });
     const idMap = new Map<string, string>();
-    data.meetings.forEach((item, index) => { if (item && typeof item === 'object' && typeof (item as Record<string, unknown>).id === 'string' && meetingsIn[index]) idMap.set(String((item as Record<string, unknown>).id), randomUUID()); });
+    meetingsIn.forEach(({ legacyId }) => { if (legacyId) idMap.set(legacyId, randomUUID()); });
     const tasksIn = data.tasks.map((item) => parseOldTask(item, idMap)).filter((item): item is Record<string, unknown> => item !== null);
     await dbTransaction(async (database) => {
       if (mode === 'replace') {
@@ -421,15 +432,14 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
         await database.run('UPDATE tasks SET deleted_at=?,updated_at=?,version=version+1 WHERE user_id=? AND deleted_at IS NULL', [nowIso(), nowIso(), user.id]);
       }
       const stamp = nowIso();
-      for (const item of meetingsIn) {
-        const oldId = String(item.id ?? '');
-        const id = idMap.get(oldId) ?? randomUUID();
+      for (const { item, legacyId } of meetingsIn) {
+        const id = legacyId ? idMap.get(legacyId) ?? randomUUID() : randomUUID();
         const followUpDate = item.followUpDate ?? null;
         const reminderLeadJson = item.reminderLeadMinutes ? JSON.stringify(item.reminderLeadMinutes) : null;
         await database.run(`INSERT INTO meetings (id,user_id,title,date,start,"end",client,contacts,type,location,notes,outcome,status,follow_up_date,reminder_lead_json,created_at,updated_at,deleted_at,version)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,1)`,
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,1)`,
         [id,user.id,item.title,item.date,item.start,item.end,item.client,item.contacts,item.type,item.location,item.notes,item.outcome,item.status,followUpDate,reminderLeadJson,stamp,stamp]);
-        idMap.set(oldId, id);
+        if (legacyId) idMap.set(legacyId, id);
       }
       for (const item of tasksIn) {
         await database.run(`INSERT INTO tasks (id,user_id,title,due_date,due_time,priority,status,category,client,meeting_id,notes,completed_at,reminder_lead_json,created_at,updated_at,deleted_at,version)

@@ -2,14 +2,17 @@ import { z } from 'zod';
 import { config as loadDotEnv } from 'dotenv';
 import { resolve } from 'node:path';
 
-if (process.env.NODE_ENV !== 'test') loadDotEnv({ path: resolve(process.cwd(), '../../.env') });
+if (process.env.NODE_ENV !== 'test' && process.env.ZF_DISABLE_DOTENV !== '1') loadDotEnv({ path: resolve(process.cwd(), '../../.env') });
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('127.0.0.1'),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_PATH: z.string().default('./data/zarghamflow.sqlite'),
-  DATABASE_URL: z.string().url().optional(),
+  DATABASE_URL: z.preprocess(
+    (value) => typeof value === 'string' && !value.trim() ? undefined : value,
+    z.string().url().optional()
+  ),
   OWNER_EMAIL: z.string().email().optional(),
   ADMIN_EMAIL: z.string().email().optional(),
   APP_URL: z.string().url().default('http://127.0.0.1:3001'),

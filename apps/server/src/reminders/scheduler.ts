@@ -20,47 +20,58 @@ if (config.VAPID_PUBLIC_KEY && config.VAPID_PRIVATE_KEY) {
 export async function scheduleEntityReminders(userId: string, type: 'task' | 'meeting', record: Record<string, unknown>, timezone: string, prefs: Record<string, unknown>): Promise<void> {
   const now = new Date().toISOString();
   const targetId = String(record.id);
-  await dbRun("UPDATE reminders SET state = 'cancelled', updated_at = ? WHERE user_id = ? AND target_type = ? AND target_id = ? AND state IN ('pending','failed')", [now, userId, type, targetId]);
-  const leads = record.reminderLeadMinutes as number[] | null | undefined;
-  if (type === 'task' && record.status === 'Done') return;
-  if (type === 'meeting' && !['Scheduled', 'Completed'].includes(String(record.status))) return;
-  const channels: Array<'email' | 'push'> = [];
-  if (prefs.emailEnabled !== false) channels.push('email');
-  if (prefs.pushEnabled !== false) channels.push('push');
-  if (!channels.length) return;
-  const dueDate = String(type === 'task' ? record.dueDate : record.date);
-  const dateOnlyTask = type === 'task' && !record.dueTime;
-  const dueTime = String(type === 'task' ? (record.dueTime || '23:59') : record.start);
-  const due = DateTime.fromISO(`${dueDate}T${dueTime}`, { zone: timezone });
-  const effectiveLeads = leads === null ? [] : leads ?? (dateOnlyTask ? [0] : type === 'task' ? [1440, 60] : [60, 15]);
-  const insert = async (id: string, targetType: string, fire: string, channel: string, lead: number, dedupeKey: string): Promise<void> => dbRun(`INSERT INTO reminders
-    (id,user_id,target_type,target_id,fire_at,channel,lead,state,attempts,created_at,updated_at,dedupe_key)
-    VALUES (?,?,?,?,?,?,?,'pending',0,?,?,?)
-    ON CONFLICT(dedupe_key) DO UPDATE SET fire_at=excluded.fire_at,state='pending',attempts=0,last_error=NULL,sent_at=NULL,updated_at=excluded.updated_at
-    WHERE reminders.state IN ('cancelled','failed')`, [id,userId,targetType,targetId,fire,channel,lead,now,now,dedupeKey]).then(() => undefined);
-  for (const lead of effectiveLeads) {
-    const base = dateOnlyTask && lead === 0 ? due.set({ hour: 9, minute: 0 }) : due.minus({ minutes: lead });
-    const fire = applyQuietHours(base, timezone, String(prefs.quietStart ?? '') || null, String(prefs.quietEnd ?? '') || null, type === 'meeting' && lead <= 30 ? due : null).toUTC().toISO();
-    if (!fire || DateTime.fromISO(fire) <= DateTime.now()) continue;
-    for (const channel of channels) await insert(randomUUID(), type, fire, channel, lead, `${type}:${targetId}:${fire}:${channel}`);
-  }
-  if (type === 'task' && prefs.overdueEnabled !== false && record.status !== 'Done') {
-    for (let day = 1; day <= 3; day++) {
-      const localDate = DateTime.fromISO(dueDate, { zone: timezone }).plus({ days: day }).toISODate();
-      if (!localDate) continue;
-      const localFire = DateTime.fromISO(`${localDate}T09:00`, { zone: timezone });
-      const fire = applyQuietHours(localFire, timezone, String(prefs.quietStart ?? '') || null, String(prefs.quietEnd ?? '') || null).toUTC().toISO();
+  await dbTransaction(async (database) => {
+    await database.run("UPDATE reminders SET state = 'cancelled', updated_at = ? WHERE user_id = ? AND target_type = ? AND target_id = ? AND state IN ('pending','failed')", [now, userId, type, targetId]);
+    const leads = record.reminderLeadMinutes as number[] | null | undefined;
+    if (type === 'task' && record.status === 'Done') return;
+    if (type === 'meeting' && !['Scheduled', 'Completed'].includes(String(record.status))) return;
+    const channels: Array<'email' | 'push'> = [];
+    if (prefs.emailEnabled !== false) channels.push('email');
+    if (prefs.pushEnabled !== false) channels.push('push');
+    if (!channels.length) return;
+    const dueDate = String(type === 'task' ? record.dueDate : record.date);
+    const dateOnlyTask = type === 'task' && !record.dueTime;
+    const dueTime = String(type === 'task' ? (record.dueTime || '23:59') : record.start);
+    const due = DateTime.fromISO(`${dueDate}T${dueTime}`, { zone: timezone });
+    const effectiveLeads = leads === null ? [] : leads ?? (dateOnlyTask ? [0] : type === 'task' ? [1440, 60] : [60, 15]);
+    const reminders: Array<[string,string,string,string,string,string,number,string,string,string]> = [];
+    const insert = (targetType: string, fire: string, channel: string, lead: number, dedupeKey: string): void => {
+      reminders.push([randomUUID(),userId,targetType,targetId,fire,channel,lead,now,now,dedupeKey]);
+    };
+    for (const lead of effectiveLeads) {
+      const base = dateOnlyTask && lead === 0 ? due.set({ hour: 9, minute: 0 }) : due.minus({ minutes: lead });
+      const fire = applyQuietHours(base, timezone, String(prefs.quietStart ?? '') || null, String(prefs.quietEnd ?? '') || null, type === 'meeting' && lead <= 30 ? due : null).toUTC().toISO();
       if (!fire || DateTime.fromISO(fire) <= DateTime.now()) continue;
-      for (const channel of channels) await insert(randomUUID(), 'overdue', fire, channel, 0, `overdue:${targetId}:${localDate}:${channel}`);
+      for (const channel of channels) insert(type, fire, channel, lead, `${type}:${targetId}:${fire}:${channel}`);
     }
-  }
-  if (type === 'meeting' && prefs.followUpEnabled !== false && record.followUpDate) {
-    const localFire = DateTime.fromISO(`${record.followUpDate}T08:00`, { zone: timezone });
-    const fire = applyQuietHours(localFire, timezone, String(prefs.quietStart ?? '') || null, String(prefs.quietEnd ?? '') || null).toUTC().toISO();
-    if (fire && DateTime.fromISO(fire) > DateTime.now()) {
-      for (const channel of channels) await insert(randomUUID(), 'followup', fire, channel, 0, `followup:${targetId}:${record.followUpDate}:${channel}`);
+    if (type === 'task' && prefs.overdueEnabled !== false && record.status !== 'Done') {
+      for (let day = 1; day <= 3; day++) {
+        const localDate = DateTime.fromISO(dueDate, { zone: timezone }).plus({ days: day }).toISODate();
+        if (!localDate) continue;
+        const localFire = DateTime.fromISO(`${localDate}T09:00`, { zone: timezone });
+        const fire = applyQuietHours(localFire, timezone, String(prefs.quietStart ?? '') || null, String(prefs.quietEnd ?? '') || null).toUTC().toISO();
+        if (!fire || DateTime.fromISO(fire) <= DateTime.now()) continue;
+        for (const channel of channels) insert('overdue', fire, channel, 0, `overdue:${targetId}:${localDate}:${channel}`);
+      }
     }
-  }
+    if (type === 'meeting' && prefs.followUpEnabled !== false && record.followUpDate) {
+      const localFire = DateTime.fromISO(`${record.followUpDate}T08:00`, { zone: timezone });
+      const fire = applyQuietHours(localFire, timezone, String(prefs.quietStart ?? '') || null, String(prefs.quietEnd ?? '') || null).toUTC().toISO();
+      if (fire && DateTime.fromISO(fire) > DateTime.now()) {
+        for (const channel of channels) insert('followup', fire, channel, 0, `followup:${targetId}:${record.followUpDate}:${channel}`);
+      }
+    }
+    if (reminders.length) {
+      const values = reminders.map(() => "(?,?,?,?,?,?,?,'pending',0,?,?,?)").join(',');
+      const params = reminders.flatMap(([id,ownerId,targetType,recordId,fire,channel,lead,createdAt,updatedAt,dedupeKey]) =>
+        [id,ownerId,targetType,recordId,fire,channel,lead,createdAt,updatedAt,dedupeKey]);
+      await database.run(`INSERT INTO reminders
+        (id,user_id,target_type,target_id,fire_at,channel,lead,state,attempts,created_at,updated_at,dedupe_key)
+        VALUES ${values}
+        ON CONFLICT(dedupe_key) DO UPDATE SET fire_at=excluded.fire_at,state='pending',attempts=0,last_error=NULL,sent_at=NULL,updated_at=excluded.updated_at
+        WHERE reminders.state IN ('cancelled','failed')`, params);
+    }
+  });
 }
 
 async function claimDue(now: string): Promise<DueReminder[]> {

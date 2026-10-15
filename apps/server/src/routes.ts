@@ -174,8 +174,10 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     if (!parsed.success) return reply.code(400).send(validationFailure(parsed.error.issues));
     const row = createMeetingRecord(parsed.data as Record<string, unknown>, user.id);
     await insertMeeting(row);
-    const account = await dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]);
-    const prefsRow = await dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id]);
+    const [account, prefsRow] = await Promise.all([
+      dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]),
+      dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id])
+    ]);
     await scheduleEntityReminders(user.id, 'meeting', { ...row, reminderLeadMinutes: parsed.data.reminderLeadMinutes }, account?.timezone ?? 'UTC', JSON.parse(prefsRow?.prefs_json ?? '{}') as Record<string, unknown>);
     return reply.code(201).send({ item: row });
   });
@@ -261,8 +263,10 @@ export async function registerRoutes(app: ApiApp): Promise<void> {
     if (!await ownsMeeting(user.id, parsed.data.meetingId)) return reply.code(400).send(failure('INVALID_MEETING', 'Related meeting is not available to this account.'));
     const row = createTaskRecord(parsed.data as Record<string, unknown>, user.id);
     await insertTask(row);
-    const account = await dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]);
-    const prefsRow = await dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id]);
+    const [account, prefsRow] = await Promise.all([
+      dbGet<{ timezone: string }>('SELECT timezone FROM users WHERE id=?', [user.id]),
+      dbGet<{ prefs_json: string }>('SELECT prefs_json FROM reminder_prefs WHERE user_id=?', [user.id])
+    ]);
     await scheduleEntityReminders(user.id, 'task', { ...row, reminderLeadMinutes: parsed.data.reminderLeadMinutes }, account?.timezone ?? 'UTC', JSON.parse(prefsRow?.prefs_json ?? '{}') as Record<string, unknown>);
     return reply.code(201).send({ item: row });
   });

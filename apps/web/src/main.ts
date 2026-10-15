@@ -142,6 +142,12 @@ async function refreshData(): Promise<void> {
     throw error;
   }
 }
+function refreshDashboardInBackground(): void {
+  if (!navigator.onLine) return;
+  void api<Record<string, unknown>>('/api/v1/dashboard').then((data) => {
+    if (state.view === 'dashboard' && !document.querySelector<HTMLDialogElement>('#dialog')?.open) render(data);
+  }).catch((error: unknown) => console.error('Could not refresh dashboard counters.', error));
+}
 async function queueOfflineDelete(kind: 'meeting'|'task', id: string): Promise<void> {
   const db = await offlineDbPromise;
   const record = existingRecord(kind, id);
@@ -505,7 +511,16 @@ async function saveRecord(kind: 'meeting'|'task', id: string, input: Record<stri
     const item: OutboxItem = { id:crypto.randomUUID(), method, url, body:clean.data, recordId:record.id, entity:kind, createdAt:now, ...(previous ? {baseVersion:previous.version, previousRecord:{...previous,kind} as CachedRecord} : {}) };
     await queueOffline(item,record); notify('Saved offline. It will sync when you reconnect.'); return true;
   }
-  try { await api(url,{method,body:JSON.stringify(clean.data)}); notify(`${kind==='meeting'?'Meeting':'Task'} saved.`); await refreshData(); return true; }
+  try {
+    const response = await api<{ item: Record<string, unknown> }>(url,{method,body:JSON.stringify(clean.data)});
+    const record = toLocalRecord(response.item);
+    if (kind === 'meeting') state.meetings = [...state.meetings.filter((item) => item.id !== record.id), record as unknown as Meeting];
+    else state.tasks = [...state.tasks.filter((item) => item.id !== record.id), record as unknown as Task];
+    void cacheRecords().catch((error: unknown) => console.error('Could not update the offline record cache.', error));
+    refreshDashboardInBackground();
+    notify(`${kind==='meeting'?'Meeting':'Task'} saved.`);
+    return true;
+  }
   catch (error) { notify((error as Error).message); return false; }
 }
 async function handleAction(element: HTMLElement): Promise<void> {
@@ -531,7 +546,7 @@ async function handleAction(element: HTMLElement): Promise<void> {
   if(action==='logout'||action==='logout-all'){await api(`/api/v1/auth/${action==='logout'?'logout':'logout-all'}`,{method:'POST',body:'{}'});state.user='';window.location.replace('/signin');return;}
   if(action==='delete-meeting'&&id||action==='delete-task'&&id){if(!confirm('Delete this item?'))return;const kind=action==='delete-meeting'?'meeting':'task';if(!navigator.onLine){await queueOfflineDelete(kind,id);return;}try{await api(`/api/v1/${kind==='meeting'?'meetings':'tasks'}/${id}`,{method:'DELETE'});await refreshData();}catch(error){notify((error as Error).message);}return;}
   if(action==='duplicate'&&id){try{await api(`/api/v1/meetings/${id}/duplicate`,{method:'POST',body:'{}'});await refreshData();notify('Meeting duplicated.');}catch(error){notify((error as Error).message);}return;}
-  if(action==='done'&&id){const task=state.tasks.find((row)=>row.id===id);if(task)await saveRecord('task',id,{title:task.title,dueDate:task.dueDate,dueTime:task.dueTime,priority:task.priority,status:task.status==='Done'?'To Do':'Done',category:task.category,client:task.client,meetingId:task.meetingId,notes:task.notes,completedAt:task.status==='Done'?null:new Date().toISOString()});return;}
+  if(action==='done'&&id){const task=state.tasks.find((row)=>row.id===id);if(task&&await saveRecord('task',id,{title:task.title,dueDate:task.dueDate,dueTime:task.dueTime,priority:task.priority,status:task.status==='Done'?'To Do':'Done',category:task.category,client:task.client,meetingId:task.meetingId,notes:task.notes,completedAt:task.status==='Done'?null:new Date().toISOString()}))render();return;}
   if(action==='settings'){state.view='settings';try{const [prefs,sessions,reminders]=await Promise.all([api<{prefs:ReminderPrefs}>('/api/v1/reminder-preferences'),api<{items:Array<Record<string,unknown>>}>('/api/v1/auth/sessions'),api<{items:Array<Record<string,unknown>>}>('/api/v1/reminders')]);state.prefs=prefs.prefs;state.sessions=sessions.items;state.reminders=reminders.items;}catch(error){notify((error as Error).message);}render();return;}
   if(action==='user-role'&&id&&state.role==='admin'){try{await api(`/api/v1/admin/users/${id}`,{method:'PATCH',body:JSON.stringify({role:element.dataset.role})});await loadAdminUsers();render();notify('User role updated.');}catch(error){notify((error as Error).message);}return;}
   if(action==='user-active'&&id&&state.role==='admin'){try{await api(`/api/v1/admin/users/${id}`,{method:'PATCH',body:JSON.stringify({active:element.dataset.active==='true'})});await loadAdminUsers();render();notify('User status updated.');}catch(error){notify((error as Error).message);}return;}
@@ -562,8 +577,57 @@ async function enablePush():Promise<void>{
 }
 async function handleSubmit(form:HTMLFormElement):Promise<void>{
   const kind=form.dataset.form;
-  if(kind==='record'){const dialog=document.querySelector<HTMLDialogElement>('#dialog');const record=formData(form);const kind=dialog?.dataset.kind as 'meeting'|'task';const id=dialog?.dataset.id??'';if(!kind)return;if(!await saveRecord(kind,id,record))return;dialog?.close();render();return;}
-  if(kind==='quick'){const text=String(formData(form).text??'').trim();if(!text)return;if(!navigator.onLine){const parsed=parseQuickOffline(text);if(!parsed.title){notify('Please enter a task title.');return;}await saveRecord('task','',parsed);return;}try{await api('/api/v1/tasks/quick-add',{method:'POST',body:JSON.stringify({text})});await refreshData();notify('Task added.');}catch(error){notify((error as Error).message);}return;}
+  if(kind==='record'){
+    if(form.dataset.saving==='true')return;
+    const dialog=document.querySelector<HTMLDialogElement>('#dialog');
+    const record=formData(form);
+    const recordKind=dialog?.dataset.kind as 'meeting'|'task'|undefined;
+    const id=dialog?.dataset.id??'';
+    if(!recordKind)return;
+    form.dataset.saving='true';
+    const submit=form.querySelector<HTMLButtonElement>('button[type="submit"],button:not([type])');
+    if(submit){submit.disabled=true;submit.textContent=id?'Saving…':'Creating…';}
+    const succeeded=await saveRecord(recordKind,id,record);
+    if(!succeeded){
+      delete form.dataset.saving;
+      if(submit){submit.disabled=false;submit.textContent=id?'Save changes':'Create';}
+      return;
+    }
+    dialog?.close();
+    render();
+    return;
+  }
+  if(kind==='quick'){
+    if(form.dataset.saving==='true')return;
+    const text=String(formData(form).text??'').trim();
+    if(!text)return;
+    const submit=form.querySelector<HTMLButtonElement>('button[type="submit"],button:not([type])');
+    form.dataset.saving='true';
+    if(submit){submit.disabled=true;submit.textContent='Adding…';}
+    let succeeded=false;
+    if(!navigator.onLine){
+      const parsed=parseQuickOffline(text);
+      if(!parsed.title)notify('Please enter a task title.');
+      else succeeded=await saveRecord('task','',parsed);
+    }else{
+      try{
+        const response=await api<{item:Record<string,unknown>}>('/api/v1/tasks/quick-add',{method:'POST',body:JSON.stringify({text})});
+        const record=toLocalRecord(response.item) as unknown as Task;
+        state.tasks=[...state.tasks.filter((item)=>item.id!==record.id),record];
+        void cacheRecords().catch((error:unknown)=>console.error('Could not update the offline record cache.',error));
+        form.reset();
+        render();
+        refreshDashboardInBackground();
+        notify('Task added.');
+        succeeded=true;
+      }catch(error){notify((error as Error).message);}
+    }
+    if(!succeeded){
+      delete form.dataset.saving;
+      if(submit){submit.disabled=false;submit.textContent='Add task';}
+    }else if(!navigator.onLine)render();
+    return;
+  }
   if(kind==='prefs'){const data=formData(form);const numbers=(value:unknown)=>String(value??'').split(',').map(v=>Number(v.trim())).filter(Number.isFinite);try{const prefs=await api<{prefs:ReminderPrefs}>('/api/v1/reminder-preferences',{method:'PUT',body:JSON.stringify({taskLeadMinutes:numbers(data.taskLeadMinutes),meetingLeadMinutes:numbers(data.meetingLeadMinutes),quietStart:data.quietStart,quietEnd:data.quietEnd,emailEnabled:data.emailEnabled,pushEnabled:data.pushEnabled,overdueEnabled:data.overdueEnabled,digestEnabled:data.digestEnabled,digestTime:data.digestTime,followUpEnabled:true})});state.prefs=prefs.prefs;notify('Reminder settings saved.');render();}catch(error){notify((error as Error).message);}return;}
 }
 async function importBackup(file:File):Promise<void>{try{const parsed=JSON.parse(await file.text()) as {meetings?:unknown[];tasks?:unknown[]};const mode=confirm('Replace all server records with this backup? Choose Cancel to merge it with your current records.');await api('/api/v1/import',{method:'POST',body:JSON.stringify({mode:mode?'replace':'merge',data:{meetings:parsed.meetings??[],tasks:parsed.tasks??[]}})});await refreshData();notify(mode?'Backup replaced server records.':'Backup merged.');}catch(error){notify((error as Error).message);}}

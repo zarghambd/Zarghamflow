@@ -9,7 +9,7 @@ test('a new user can sign in with OTP and create persistent tasks and meetings',
   await page.goto('/signin');
   await page.getByLabel('Email address').fill(email);
   await page.getByRole('button', { name: 'Send me a sign-in code' }).click();
-  await expect(page.getByLabel('6-digit code')).toBeVisible();
+  await expect(page.getByLabel('6-digit code')).toBeVisible({ timeout: 20_000 });
 
   let otp = '';
   await expect.poll(async () => {
@@ -31,22 +31,38 @@ test('a new user can sign in with OTP and create persistent tasks and meetings',
   await page.locator('#app button[data-action="new-task"]').first().click();
   await expect(page.locator('#dialog')).toBeVisible();
   await page.locator('#dialog input[name="title"]').fill(taskTitle);
-  const [taskCreated] = await Promise.all([
-    page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/v1/tasks')),
-    page.getByRole('button', { name: 'Create' }).click()
-  ]);
+  let taskPostCount = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/v1/tasks')) taskPostCount++;
+  });
+  const taskCreatedResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/v1/tasks'));
+  await page.locator('#dialog form[data-form="record"]').evaluate((form) => {
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await expect(page.getByRole('button', { name: 'Creating…' })).toBeDisabled();
+  const taskCreated = await taskCreatedResponse;
   expect(taskCreated.status()).toBe(201);
+  expect(taskPostCount).toBe(1);
   await expect(page.locator('#app')).toContainText(taskTitle);
 
   const meetingTitle = `Playwright meeting ${Date.now()}`;
   await page.locator('#app button[data-action="new-meeting"]').first().click();
   await expect(page.locator('#dialog')).toBeVisible();
   await page.locator('#dialog input[name="title"]').fill(meetingTitle);
-  const [meetingCreated] = await Promise.all([
-    page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/v1/meetings')),
-    page.getByRole('button', { name: 'Create' }).click()
-  ]);
+  let meetingPostCount = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/v1/meetings')) meetingPostCount++;
+  });
+  const meetingCreatedResponse = page.waitForResponse((response) => response.request().method() === 'POST' && response.url().endsWith('/api/v1/meetings'));
+  await page.locator('#dialog form[data-form="record"]').evaluate((form) => {
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await expect(page.getByRole('button', { name: 'Creating…' })).toBeDisabled();
+  const meetingCreated = await meetingCreatedResponse;
   expect(meetingCreated.status()).toBe(201);
+  expect(meetingPostCount).toBe(1);
   await page.reload();
   await expect(page.locator('#app')).toContainText(taskTitle);
   await expect(page.locator('#app')).toContainText(meetingTitle);

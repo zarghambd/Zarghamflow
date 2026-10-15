@@ -535,7 +535,7 @@ window.addEventListener('online',()=>{state.online=true;void syncOutbox();});win
 window.addEventListener('beforeinstallprompt',(event)=>{event.preventDefault();state.installPrompt=event as BeforeInstallPromptEvent;render();});
 if('serviceWorker'in navigator){
   navigator.serviceWorker.addEventListener('controllerchange',()=>location.reload());
-  void navigator.serviceWorker.register('/service-worker.js').then((registration)=>{
+  void navigator.serviceWorker.register(`/service-worker.js?build=${encodeURIComponent(process.env.NEXT_PUBLIC_BUILD_ID ?? 'development')}`).then((registration)=>{
     const checkWaiting=()=>{if(registration.waiting&&navigator.serviceWorker.controller){waitingWorker=registration.waiting;state.updateAvailable=true;render();}};
     checkWaiting();
     registration.addEventListener('updatefound',()=>{

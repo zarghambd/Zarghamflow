@@ -1,18 +1,23 @@
-const VERSION = 'taskora-shell-v2';
+const BUILD_ID = new URL(self.location.href).searchParams.get('build') || 'development';
+const VERSION = `zarghamflow-shell-${BUILD_ID}`;
+const API_CACHE = `${VERSION}-api`;
 const SHELL = [ '/', '/manifest.webmanifest', '/icon.svg' ];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(VERSION).then((cache) => cache.addAll(SHELL)));
 });
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => (key.startsWith('zarghamflow-') || key.startsWith('taskora-shell-')) && key !== VERSION).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) =>
+    (key.startsWith('zarghamflow-') || key.startsWith('taskora-shell-')) && key !== VERSION && key !== API_CACHE
+  ).map((key) => caches.delete(key)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
   const url = new URL(request.url);
   if (url.pathname.startsWith('/api/')) {
+    if (/^\/api\/(?:v1\/)?auth(?:\/|$)/.test(url.pathname)) return;
     event.respondWith(fetch(request).then((response) => {
-      if (response.ok) { const copy = response.clone(); void caches.open(`${VERSION}-api`).then((cache) => cache.put(request, copy)); }
+      if (response.ok) { const copy = response.clone(); void caches.open(API_CACHE).then((cache) => cache.put(request, copy)); }
       return response;
     }).catch(async () => (await caches.match(request)) || new Response(JSON.stringify({ error: { code: 'OFFLINE', message: 'Offline. Cached data is available; edits will sync when reconnected.' } }), { status: 503, headers: { 'content-type': 'application/json' } })));
     return;

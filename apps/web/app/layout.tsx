@@ -1,6 +1,7 @@
 import './globals.css';
 import type { Metadata } from 'next';
 import { Bricolage_Grotesque, DM_Sans } from 'next/font/google';
+import ServiceWorkerRegistration from './service-worker-registration';
 
 const display = Bricolage_Grotesque({
   subsets: ['latin'],
@@ -24,7 +25,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable}`}>
-      <body>{children}</body>
+      <body><ServiceWorkerRegistration />{children}</body>
     </html>
   );
 }
